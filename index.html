@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Knit Art Studio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <div class="header">
+      <h1>Knit Art Studio</h1>
+      <p>Image → stitch pattern generator</p>
+    </div>
+
+    <div class="workspace">
+      <!-- Design column: design card + options card (matches preview column height) -->
+      <div class="panel-column">
+        <div class="panel-card panel-card--design">
+          <div class="panel-section">
+            <div class="section-label">Stitch style</div>
+            <div class="stitch-grid">
+              <button type="button" class="stitch-btn active" data-stitch="knit">Knit</button>
+              <button type="button" class="stitch-btn" data-stitch="crochet">Crochet</button>
+              <button type="button" class="stitch-btn" data-stitch="tapestry">Tapestry</button>
+              <button type="button" class="stitch-btn" data-stitch="cross">Cross-stitch</button>
+            </div>
+          </div>
+
+          <div class="panel-section">
+            <div class="section-label">Resolution</div>
+            <div class="slider-row">
+              <label>Stitch size</label>
+              <input type="range" id="stitchSize" min="1" max="8" value="4" step="1" />
+              <input type="number" id="stitchSizeInput" min="1" max="8" value="4" step="1" />
+              <span class="val" id="stitchSizeVal">4px</span>
+            </div>
+            <div class="slider-row">
+              <label>Seed colors</label>
+              <input type="range" id="colorCount" min="1" max="16" value="1" step="1" />
+              <input type="number" id="colorCountInput" min="1" max="16" value="1" step="1" />
+              <span class="val" id="colorCountVal">1</span>
+            </div>
+          </div>
+
+          <div class="panel-section panel-section--palette">
+            <div class="section-label">Custom palette</div>
+            <div class="palette-toolbar">
+              <button class="picker-trigger" id="pickerTrigger" title="Edit selected color"></button>
+              <button type="button" class="btn-toolbar btn-mini palette-icon-btn" id="addColorBtn" title="Add color">+</button>
+            </div>
+            <div class="picker-popover" id="pickerPopover" aria-hidden="true">
+              <div class="figma-picker" id="figmaPicker">
+                <div class="sv-plane" id="svPlane">
+                  <div class="sv-white"></div>
+                  <div class="sv-black"></div>
+                  <div class="sv-handle" id="svHandle"></div>
+                </div>
+                <div class="hue-presets" id="huePresets" role="group" aria-label="Hue presets"></div>
+                <div class="hue-wrap">
+                  <input type="range" id="hueSlider" min="0" max="360" value="0" />
+                  <div class="hue-val" id="hueVal">0°</div>
+                </div>
+              </div>
+            </div>
+            <div class="palette-editor-scroll">
+              <div class="palette-editor" id="paletteEditor">
+                <div class="palette-empty">Upload an image to auto-seed colors.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-card panel-card--options">
+          <div class="section-label">Preview options</div>
+          <div class="toggle-row" id="textureRow">
+            <span>Texture depth</span>
+            <button class="toggle on" id="textureToggle"></button>
+          </div>
+          <div class="toggle-row is-hidden" id="gridRow">
+            <span>Grid lines</span>
+            <button class="toggle on" id="gridToggle"></button>
+          </div>
+          <div class="status-bar" id="statusBar">awaiting image</div>
+        </div>
+      </div>
+
+      <!-- Right Column -->
+      <div class="right-col">
+        <div class="canvas-toolbar">
+          <div class="canvas-toolbar-left">
+            <button type="button" class="btn-preview-mode active" id="previewSwatchBtn" data-preview="swatch">Swatch</button>
+            <button type="button" class="btn-preview-mode" id="previewChartBtn" data-preview="chart">Chart</button>
+          </div>
+          <div class="canvas-toolbar-right">
+            <button type="button" class="btn-toolbar btn-mini btn-icon" id="undoBtn" disabled title="Undo (⌘Z)" aria-label="Undo">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 7v6h6" />
+                <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+              </svg>
+            </button>
+            <button type="button" class="btn-toolbar btn-mini btn-icon" id="redoBtn" disabled title="Redo (⇧⌘Z)" aria-label="Redo">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 7v6h-6" />
+                <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" />
+              </svg>
+            </button>
+            <div class="zoom-controls" id="zoomControls" aria-label="Preview zoom">
+              <button type="button" class="btn-toolbar btn-mini zoom-btn" id="zoomOutBtn" title="Zoom out" disabled>−</button>
+              <input type="text" class="zoom-input" id="zoomInput" value="100%" inputmode="decimal" spellcheck="false" autocomplete="off" aria-label="Zoom percent" title="Type zoom (25–400)" disabled />
+              <button type="button" class="btn-toolbar btn-mini zoom-btn" id="zoomInBtn" title="Zoom in" disabled>+</button>
+            </div>
+            <button type="button" class="btn-toolbar" id="clearImageBtn" disabled title="Remove image from preview">Remove image</button>
+            <button type="button" class="btn-toolbar btn-cta-secondary" id="removeBgBtn" disabled title="Remove background region">Remove BG</button>
+            <button type="button" class="btn-toolbar" id="selectToolBtn" disabled title="Select area on artwork">Select</button>
+            <button type="button" class="btn-toolbar btn-cta-secondary" id="copySelectionBtn" disabled title="Copy selected area">Copy</button>
+            <button type="button" class="btn-toolbar btn-cta-secondary" id="pasteSelectionBtn" disabled title="Paste copied area">Paste</button>
+            <label class="download-format-label" for="downloadFormat">Format</label>
+            <select id="downloadFormat" class="download-format-select" aria-label="Download file format" disabled>
+              <option value="svg">SVG</option>
+              <option value="jpeg">JPEG</option>
+            </select>
+            <button type="button" class="btn-primary" id="downloadBtn" disabled>Download</button>
+          </div>
+        </div>
+        <div class="canvas-area" id="canvasArea">
+          <div class="preview-viewport" id="previewViewport">
+          <div class="canvas-placeholder" id="placeholder">
+            <svg class="placeholder-art" viewBox="0 0 100 100" fill="none">
+              <rect x="8" y="8" width="84" height="84" rx="6" stroke="currentColor" stroke-width="1" stroke-dasharray="5 3"/>
+              <g opacity=".5">
+                <path d="M22 42 Q27 37 32 42 Q37 47 42 42 Q47 37 52 42 Q57 47 62 42 Q67 37 72 42" stroke="currentColor" stroke-width="1.3" fill="none"/>
+                <path d="M22 54 Q27 49 32 54 Q37 59 42 54 Q47 49 52 54 Q57 59 62 54 Q67 49 72 54" stroke="currentColor" stroke-width="1.3" fill="none"/>
+                <path d="M22 66 Q27 61 32 66 Q37 71 42 66 Q47 61 52 66 Q57 71 62 66 Q67 61 72 66" stroke="currentColor" stroke-width="1.3" fill="none"/>
+              </g>
+              <circle cx="50" cy="30" r="12" stroke="currentColor" stroke-width="1" opacity=".3"/>
+            </svg>
+            <p>Drop an image here or click to browse</p>
+          </div>
+
+          <div id="outputContainer"></div>
+
+          <div class="processing-overlay" id="processingOverlay">
+            <div class="spinner"></div>
+            <p id="processingMsg">Weaving stitches...</p>
+          </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <input type="file" id="hiddenInput" accept="image/*" />
+
+  <script src="src/palettes.js"></script>
+  <script src="src/colors.js"></script>
+  <script src="src/renderer.js"></script>
+  <script src="src/app.js"></script>
+</body>
+</html>
