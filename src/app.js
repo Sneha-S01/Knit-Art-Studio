@@ -638,6 +638,23 @@ import './renderer.js'
     return /\.(png|jpe?g|gif|webp|bmp|svg|avif|heic|heif)$/i.test(file.name);
   }
 
+  function getFirstImageFile(dataTransfer) {
+    if (!dataTransfer) return null;
+    if (dataTransfer.items && dataTransfer.items.length) {
+      for (const item of dataTransfer.items) {
+        if (item.kind !== 'file') continue;
+        const f = item.getAsFile && item.getAsFile();
+        if (f && isImageFile(f)) return f;
+      }
+    }
+    if (dataTransfer.files && dataTransfer.files.length) {
+      for (const f of dataTransfer.files) {
+        if (isImageFile(f)) return f;
+      }
+    }
+    return null;
+  }
+
   /**
    * Bind drag/drop directly on #canvasArea in the capture phase.
    * Document-level + clientX/Y hit-testing breaks on some browsers (drop coords wrong / no drop).
@@ -648,8 +665,9 @@ import './renderer.js'
     e => {
       e.preventDefault();
       e.stopPropagation();
-      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-      canvasArea.classList.add('dragover');
+      const file = getFirstImageFile(e.dataTransfer);
+      if (e.dataTransfer) e.dataTransfer.dropEffect = file ? 'copy' : 'none';
+      if (file) canvasArea.classList.add('dragover');
     },
     true
   );
@@ -659,7 +677,9 @@ import './renderer.js'
     e => {
       e.preventDefault();
       e.stopPropagation();
-      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      const file = getFirstImageFile(e.dataTransfer);
+      if (e.dataTransfer) e.dataTransfer.dropEffect = file ? 'copy' : 'none';
+      canvasArea.classList.toggle('dragover', !!file);
     },
     true
   );
@@ -680,11 +700,16 @@ import './renderer.js'
       e.preventDefault();
       e.stopPropagation();
       canvasArea.classList.remove('dragover');
-      const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-      if (file && isImageFile(file)) loadImage(file);
+      const file = getFirstImageFile(e.dataTransfer);
+      if (file) loadImage(file);
+      else pulseStatus('Drop an image file to add it');
     },
     true
   );
+
+  // Prevent the browser from navigating away when file is dropped outside target.
+  document.addEventListener('dragover', e => e.preventDefault());
+  document.addEventListener('drop', e => e.preventDefault());
 
   document.addEventListener('dragend', () => {
     canvasArea.classList.remove('dragover');
