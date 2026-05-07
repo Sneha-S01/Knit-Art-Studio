@@ -1,7 +1,14 @@
-import './style.css'
-import './palettes.js'
-import './colors.js'
-import './renderer.js'
+import "./style.css";
+import { renderPreview } from "./renderer.js";
+import {
+  buildPixelGrid,
+  kMeansColors,
+  normalizeHex,
+  hexToRgb,
+  rgbToHex,
+  rgbToHsl,
+  hslToHex
+} from "./colors.js";
 
 /**
  * app.js
@@ -628,6 +635,12 @@ import './renderer.js'
   /* ─── File drop & browse ─────────────────────────────────── */
   placeholder.addEventListener('click', e => {
     e.stopPropagation();
+    hiddenInput.value = '';
+    hiddenInput.click();
+  });
+
+  canvasArea.addEventListener('dblclick', () => {
+    hiddenInput.value = '';
     hiddenInput.click();
   });
 
@@ -641,14 +654,16 @@ import './renderer.js'
   function getFirstImageFile(dataTransfer) {
     if (!dataTransfer) return null;
     if (dataTransfer.items && dataTransfer.items.length) {
-      for (const item of dataTransfer.items) {
+      for (let i = 0; i < dataTransfer.items.length; i++) {
+        const item = dataTransfer.items[i];
         if (item.kind !== 'file') continue;
         const f = item.getAsFile && item.getAsFile();
         if (f && isImageFile(f)) return f;
       }
     }
     if (dataTransfer.files && dataTransfer.files.length) {
-      for (const f of dataTransfer.files) {
+      for (let i = 0; i < dataTransfer.files.length; i++) {
+        const f = dataTransfer.files[i];
         if (isImageFile(f)) return f;
       }
     }
@@ -716,7 +731,8 @@ import './renderer.js'
   });
 
   hiddenInput.addEventListener('change', () => {
-    if (hiddenInput.files[0]) loadImage(hiddenInput.files[0]);
+    if (hiddenInput.files && hiddenInput.files[0]) loadImage(hiddenInput.files[0]);
+    else pulseStatus('No image selected');
   });
 
   /* ─── Core functions ─────────────────────────────────────── */

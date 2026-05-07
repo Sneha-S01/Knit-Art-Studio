@@ -4,7 +4,7 @@
  * Each palette is an array of hex color strings.
  */
 
-const PALETTES = {
+export const PALETTES = {
   /**
    * Uses the image's own colors via k-means clustering.
    * null signals the renderer to run k-means instead.
@@ -31,3 +31,4 @@ const PALETTES = {
     '#6a2080', '#4a0868', '#2a0448', '#1a0533'
   ]
 };
+

@@ -5,6 +5,8 @@
  *  - nearest-color quantization against a fixed palette
  */
 
+import { PALETTES } from "./palettes.js";
+
 /**
  * Run k-means clustering on image pixel data to find `k` dominant colors.
  * Samples every 16th pixel for performance.
@@ -13,7 +15,7 @@
  * @param {number} k            - Number of color clusters (palette size)
  * @returns {Array<[number,number,number]>} Array of [r, g, b] cluster centers
  */
-function kMeansColors(imageData, k) {
+export function kMeansColors(imageData, k) {
   const pixels = [];
   for (let i = 0; i < imageData.data.length; i += 16) {
     pixels.push([imageData.data[i], imageData.data[i + 1], imageData.data[i + 2]]);
@@ -61,7 +63,7 @@ function kMeansColors(imageData, k) {
  * @param {string} hex
  * @returns {string}
  */
-function normalizeHex(hex) {
+export function normalizeHex(hex) {
   if (!hex || typeof hex !== 'string') return '#000000';
   let h = hex.trim().replace(/^#/, '');
   if (h.length === 3) {
@@ -137,7 +139,7 @@ function resolveColor(r, g, b, palette, colorCenters) {
  * @param {boolean[]|null} paletteEnabled - Per-slot visibility; hidden slots render as white
  * @returns {{ grid, cols, rows, stitchSize, colorList }}
  */
-function buildPixelGrid(
+export function buildPixelGrid(
   sourceImage,
   stitchSize,
   colorCount,
@@ -231,13 +233,13 @@ function buildPixelGrid(
   return { grid, cols, rows, stitchSize, colorList };
 }
 
-function rgbToHex(r, g, b) {
+export function rgbToHex(r, g, b) {
   return '#' + [r, g, b]
     .map(v => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0'))
     .join('');
 }
 
-function hexToRgb(hex) {
+export function hexToRgb(hex) {
   return [
     parseInt(hex.slice(1, 3), 16),
     parseInt(hex.slice(3, 5), 16),
@@ -245,7 +247,7 @@ function hexToRgb(hex) {
   ];
 }
 
-function rgbToHsl(r, g, b) {
+export function rgbToHsl(r, g, b) {
   const rn = r / 255;
   const gn = g / 255;
   const bn = b / 255;
@@ -269,7 +271,7 @@ function rgbToHsl(r, g, b) {
   return [Math.round(h), Math.round(s * 100), Math.round(l * 100)];
 }
 
-function hslToHex(h, s, l) {
+export function hslToHex(h, s, l) {
   const sn = Math.max(0, Math.min(100, s)) / 100;
   const ln = Math.max(0, Math.min(100, l)) / 100;
   const c = (1 - Math.abs(2 * ln - 1)) * sn;

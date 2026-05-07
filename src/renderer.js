@@ -3,7 +3,7 @@
  * SVG-based stitch rendering: realistic swatch vs knit chart.
  */
 
-function renderPreview(pixelData, previewMode, stitchType, showGrid, showTexture) {
+export function renderPreview(pixelData, previewMode, stitchType, showGrid, showTexture) {
   if (previewMode === 'chart') {
     return renderKnitChartPatternSVG(pixelData, showGrid);
   } else {
@@ -187,3 +187,4 @@ function renderKnitChartPatternSVG(pixelData, showGrid) {
   svg += `</svg>`;
   return svg;
 }
+
