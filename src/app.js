@@ -1,3 +1,8 @@
+import './style.css'
+import './palettes.js'
+import './colors.js'
+import './renderer.js'
+
 /**
  * app.js
  * Main application controller.
