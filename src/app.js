@@ -72,7 +72,6 @@ import {
   const zoomOutBtn = document.getElementById('zoomOutBtn');
   const zoomInput = document.getElementById('zoomInput');
   const clearImageBtn = document.getElementById('clearImageBtn');
-  const removeBgBtn = document.getElementById('removeBgBtn');
   const selectToolBtn = document.getElementById('selectToolBtn');
   const copySelectionBtn = document.getElementById('copySelectionBtn');
   const pasteSelectionBtn = document.getElementById('pasteSelectionBtn');
@@ -109,7 +108,6 @@ import {
   }
 
   function setCollageControlsState(hasImage) {
-    removeBgBtn.disabled = !hasImage;
     selectToolBtn.disabled = !hasImage;
     copySelectionBtn.disabled = !hasImage || !selectionRect;
     pasteSelectionBtn.disabled = !hasImage || !copiedPatch;
@@ -197,45 +195,6 @@ import {
     pulseStatus(`Pasted ${copiedPatch[0].length}×${copiedPatch.length} stitches`);
   }
 
-  function floodFillReplace(startX, startY, fromIdx, toIdx) {
-    if (!lastPixelData || fromIdx === toIdx) return;
-    const { cols, rows, grid } = lastPixelData;
-    const q = [[startX, startY]];
-    while (q.length) {
-      const [x, y] = q.pop();
-      if (x < 0 || y < 0 || x >= cols || y >= rows) continue;
-      if (grid[y][x] !== fromIdx) continue;
-      grid[y][x] = toIdx;
-      q.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
-    }
-  }
-
-  function removeBackgroundRegion() {
-    if (!lastPixelData) return;
-    pushUndoHistory();
-    let bgIdx = 0;
-    let bestLuma = -1;
-    for (let i = 0; i < lastPixelData.colorList.length; i++) {
-      const [r, g, b] = lastPixelData.colorList[i];
-      const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      if (luma > bestLuma) {
-        bestLuma = luma;
-        bgIdx = i;
-      }
-    }
-    const corners = [
-      [0, 0],
-      [lastPixelData.cols - 1, 0],
-      [0, lastPixelData.rows - 1],
-      [lastPixelData.cols - 1, lastPixelData.rows - 1]
-    ];
-    corners.forEach(([x, y]) => {
-      const from = lastPixelData.grid[y][x];
-      floodFillReplace(x, y, from, bgIdx);
-    });
-    rerenderPreviewFromLastData();
-    pulseStatus('Background regions removed from corners');
-  }
 
   function clonePixelData(pd) {
     return {
@@ -501,7 +460,6 @@ import {
     e.stopPropagation();
     clearImage();
   });
-  removeBgBtn.addEventListener('click', removeBackgroundRegion);
   selectToolBtn.addEventListener('click', toggleSelectTool);
   copySelectionBtn.addEventListener('click', copySelectionPatch);
   pasteSelectionBtn.addEventListener('click', pasteSelectionPatch);
@@ -746,7 +704,6 @@ import {
     downloadBtn.disabled = true;
     downloadFormatSelect.disabled = true;
     clearImageBtn.disabled = true;
-    removeBgBtn.disabled = true;
     selectToolBtn.disabled = true;
     copySelectionBtn.disabled = true;
     pasteSelectionBtn.disabled = true;
