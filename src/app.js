@@ -60,11 +60,170 @@
   const zoomOutBtn = document.getElementById('zoomOutBtn');
   const zoomInput = document.getElementById('zoomInput');
   const clearImageBtn = document.getElementById('clearImageBtn');
+  const removeBgBtn = document.getElementById('removeBgBtn');
+  const selectToolBtn = document.getElementById('selectToolBtn');
+  const copySelectionBtn = document.getElementById('copySelectionBtn');
+  const pasteSelectionBtn = document.getElementById('pasteSelectionBtn');
   const downloadFormatSelect = document.getElementById('downloadFormat');
   const textureRow = document.getElementById('textureRow');
   const gridRow = document.getElementById('gridRow');
   const undoBtn = document.getElementById('undoBtn');
   const redoBtn = document.getElementById('redoBtn');
+  const selectionOverlay = document.createElement('div');
+  selectionOverlay.className = 'selection-overlay';
+  previewViewport.appendChild(selectionOverlay);
+
+  let selectToolEnabled = false;
+  let selecting = false;
+  let selectionRect = null;
+  let copiedPatch = null;
+  let selectionStartCell = null;
+
+  function pulseStatus(message) {
+    statusBar.textContent = message;
+    statusBar.classList.remove('status-bar--live');
+    void statusBar.offsetWidth;
+    statusBar.classList.add('status-bar--live');
+  }
+
+  function setupInteractiveFeedback() {
+    document.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('pointerdown', () => btn.classList.add('is-pressed'));
+      const clear = () => btn.classList.remove('is-pressed');
+      btn.addEventListener('pointerup', clear);
+      btn.addEventListener('pointerleave', clear);
+      btn.addEventListener('pointercancel', clear);
+    });
+  }
+
+  function setCollageControlsState(hasImage) {
+    removeBgBtn.disabled = !hasImage;
+    selectToolBtn.disabled = !hasImage;
+    copySelectionBtn.disabled = !hasImage || !selectionRect;
+    pasteSelectionBtn.disabled = !hasImage || !copiedPatch;
+  }
+
+  function clearSelection() {
+    selectionRect = null;
+    selecting = false;
+    selectionStartCell = null;
+    selectionOverlay.style.display = 'none';
+    copySelectionBtn.disabled = true;
+  }
+
+  function getSvgCellFromPointer(event) {
+    if (!lastPixelData) return null;
+    const svg = outputContainer.querySelector('svg');
+    if (!svg) return null;
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const nx = (event.clientX - rect.left) / rect.width;
+    const ny = (event.clientY - rect.top) / rect.height;
+    if (nx < 0 || nx > 1 || ny < 0 || ny > 1) return null;
+    const x = Math.max(0, Math.min(lastPixelData.cols - 1, Math.floor(nx * lastPixelData.cols)));
+    const y = Math.max(0, Math.min(lastPixelData.rows - 1, Math.floor(ny * lastPixelData.rows)));
+    return { x, y, rect };
+  }
+
+  function updateSelectionOverlay() {
+    if (!selectionRect || !lastPixelData) {
+      selectionOverlay.style.display = 'none';
+      return;
+    }
+    const svg = outputContainer.querySelector('svg');
+    if (!svg) {
+      selectionOverlay.style.display = 'none';
+      return;
+    }
+    const svgRect = svg.getBoundingClientRect();
+    const vpRect = previewViewport.getBoundingClientRect();
+    const cellW = svgRect.width / lastPixelData.cols;
+    const cellH = svgRect.height / lastPixelData.rows;
+    selectionOverlay.style.left = `${(svgRect.left - vpRect.left) + selectionRect.x * cellW + previewViewport.scrollLeft}px`;
+    selectionOverlay.style.top = `${(svgRect.top - vpRect.top) + selectionRect.y * cellH + previewViewport.scrollTop}px`;
+    selectionOverlay.style.width = `${Math.max(1, selectionRect.w * cellW)}px`;
+    selectionOverlay.style.height = `${Math.max(1, selectionRect.h * cellH)}px`;
+    selectionOverlay.style.display = 'block';
+  }
+
+  function toggleSelectTool() {
+    selectToolEnabled = !selectToolEnabled;
+    selectToolBtn.classList.toggle('active', selectToolEnabled);
+    if (!selectToolEnabled) clearSelection();
+  }
+
+  function copySelectionPatch() {
+    if (!lastPixelData || !selectionRect) return;
+    const patch = [];
+    for (let y = 0; y < selectionRect.h; y++) {
+      const row = [];
+      for (let x = 0; x < selectionRect.w; x++) {
+        row.push(lastPixelData.grid[selectionRect.y + y][selectionRect.x + x]);
+      }
+      patch.push(row);
+    }
+    copiedPatch = patch;
+    pasteSelectionBtn.disabled = false;
+    pulseStatus(`Copied ${selectionRect.w}×${selectionRect.h} stitches`);
+  }
+
+  function pasteSelectionPatch() {
+    if (!lastPixelData || !copiedPatch) return;
+    pushUndoHistory();
+    const startX = selectionRect ? selectionRect.x : Math.max(0, Math.floor((lastPixelData.cols - copiedPatch[0].length) / 2));
+    const startY = selectionRect ? selectionRect.y : Math.max(0, Math.floor((lastPixelData.rows - copiedPatch.length) / 2));
+    for (let y = 0; y < copiedPatch.length; y++) {
+      for (let x = 0; x < copiedPatch[y].length; x++) {
+        const tx = startX + x;
+        const ty = startY + y;
+        if (tx >= 0 && tx < lastPixelData.cols && ty >= 0 && ty < lastPixelData.rows) {
+          lastPixelData.grid[ty][tx] = copiedPatch[y][x];
+        }
+      }
+    }
+    rerenderPreviewFromLastData();
+    pulseStatus(`Pasted ${copiedPatch[0].length}×${copiedPatch.length} stitches`);
+  }
+
+  function floodFillReplace(startX, startY, fromIdx, toIdx) {
+    if (!lastPixelData || fromIdx === toIdx) return;
+    const { cols, rows, grid } = lastPixelData;
+    const q = [[startX, startY]];
+    while (q.length) {
+      const [x, y] = q.pop();
+      if (x < 0 || y < 0 || x >= cols || y >= rows) continue;
+      if (grid[y][x] !== fromIdx) continue;
+      grid[y][x] = toIdx;
+      q.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+    }
+  }
+
+  function removeBackgroundRegion() {
+    if (!lastPixelData) return;
+    pushUndoHistory();
+    let bgIdx = 0;
+    let bestLuma = -1;
+    for (let i = 0; i < lastPixelData.colorList.length; i++) {
+      const [r, g, b] = lastPixelData.colorList[i];
+      const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      if (luma > bestLuma) {
+        bestLuma = luma;
+        bgIdx = i;
+      }
+    }
+    const corners = [
+      [0, 0],
+      [lastPixelData.cols - 1, 0],
+      [0, lastPixelData.rows - 1],
+      [lastPixelData.cols - 1, lastPixelData.rows - 1]
+    ];
+    corners.forEach(([x, y]) => {
+      const from = lastPixelData.grid[y][x];
+      floodFillReplace(x, y, from, bgIdx);
+    });
+    rerenderPreviewFromLastData();
+    pulseStatus('Background regions removed from corners');
+  }
 
   function clonePixelData(pd) {
     return {
@@ -330,6 +489,10 @@
     e.stopPropagation();
     clearImage();
   });
+  removeBgBtn.addEventListener('click', removeBackgroundRegion);
+  selectToolBtn.addEventListener('click', toggleSelectTool);
+  copySelectionBtn.addEventListener('click', copySelectionPatch);
+  pasteSelectionBtn.addEventListener('click', pasteSelectionPatch);
 
   let previewPanning = false;
   let previewPanStartX = 0;
@@ -353,6 +516,17 @@
     if (e.pointerType !== 'mouse' && e.pointerType !== 'pen') return;
     if (placeholder.style.display !== 'none') return;
     if (!outputContainer.querySelector('svg')) return;
+    if (selectToolEnabled) {
+      const cell = getSvgCellFromPointer(e);
+      if (!cell) return;
+      selecting = true;
+      selectionStartCell = { x: cell.x, y: cell.y };
+      selectionRect = { x: cell.x, y: cell.y, w: 1, h: 1 };
+      copySelectionBtn.disabled = true;
+      previewViewport.setPointerCapture(e.pointerId);
+      updateSelectionOverlay();
+      return;
+    }
     const can =
       previewViewport.scrollWidth > previewViewport.clientWidth + 2 ||
       previewViewport.scrollHeight > previewViewport.clientHeight + 2;
@@ -367,6 +541,17 @@
   });
 
   previewViewport.addEventListener('pointermove', e => {
+    if (selecting && selectionStartCell) {
+      const cell = getSvgCellFromPointer(e);
+      if (!cell) return;
+      const minX = Math.min(selectionStartCell.x, cell.x);
+      const minY = Math.min(selectionStartCell.y, cell.y);
+      const maxX = Math.max(selectionStartCell.x, cell.x);
+      const maxY = Math.max(selectionStartCell.y, cell.y);
+      selectionRect = { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+      updateSelectionOverlay();
+      return;
+    }
     if (!previewPanning) return;
     const dx = e.clientX - previewPanStartX;
     const dy = e.clientY - previewPanStartY;
@@ -375,6 +560,18 @@
   });
 
   function endPreviewPan(e) {
+    if (selecting) {
+      selecting = false;
+      selectionStartCell = null;
+      copySelectionBtn.disabled = !selectionRect;
+      updateSelectionOverlay();
+      try {
+        previewViewport.releasePointerCapture(e.pointerId);
+      } catch (_) {
+        /* ignore */
+      }
+      return;
+    }
     if (!previewPanning) return;
     previewPanning = false;
     previewViewport.classList.remove('is-panning');
@@ -387,11 +584,15 @@
 
   previewViewport.addEventListener('pointerup', endPreviewPan);
   previewViewport.addEventListener('pointercancel', endPreviewPan);
+  previewViewport.addEventListener('scroll', () => {
+    if (selectionRect) updateSelectionOverlay();
+  });
 
   window.addEventListener('resize', () => {
     if (outputContainer.querySelector('svg')) {
       applyPreviewSizing();
       updatePreviewPanState();
+      updateSelectionOverlay();
     }
   });
 
@@ -499,6 +700,10 @@
     downloadBtn.disabled = true;
     downloadFormatSelect.disabled = true;
     clearImageBtn.disabled = true;
+    removeBgBtn.disabled = true;
+    selectToolBtn.disabled = true;
+    copySelectionBtn.disabled = true;
+    pasteSelectionBtn.disabled = true;
     hiddenInput.value = '';
     previewZoom = 1;
     previewViewport.scrollLeft = 0;
@@ -510,7 +715,11 @@
     colorCountNumberInput.value = '1';
     colorCountVal.textContent = '1';
     renderPaletteEditor();
-    statusBar.textContent = 'awaiting image';
+    pulseStatus('awaiting image');
+    copiedPatch = null;
+    selectToolEnabled = false;
+    selectToolBtn.classList.remove('active');
+    clearSelection();
     resetHistoryStacks();
   }
 
@@ -523,6 +732,7 @@
         previewZoom = 1;
         resetPreviewScrollNext = true;
         clearImageBtn.disabled = false;
+        setCollageControlsState(true);
         stitchSizeInput.value = '4';
         stitchSizeNumberInput.value = '4';
         stitchSizeVal.textContent = '4px';
@@ -530,7 +740,7 @@
         colorCountNumberInput.value = '16';
         colorCountVal.textContent = '16';
         gridToggle.classList.add('on');
-        statusBar.textContent = `${img.width} × ${img.height}px — ready`;
+        pulseStatus(`${img.width} × ${img.height}px — ready`);
         paletteItems = extractPaletteFromImage(parseInt(colorCountInput.value, 10));
         selectedColorIndex = 0;
         renderPaletteEditor();
@@ -564,6 +774,7 @@
     placeholder.style.display = 'none';
     downloadBtn.disabled = false;
     downloadFormatSelect.disabled = false;
+    setCollageControlsState(true);
 
     if (resetPreviewScrollNext) {
       previewViewport.scrollLeft = 0;
@@ -572,11 +783,12 @@
     }
     applyPreviewSizing();
     updatePreviewPanState();
+    updateSelectionOverlay();
 
     const { cols, rows } = lastPixelData;
     const enabledCount = paletteItems.filter(p => p.enabled).length;
     const prevLabel = previewMode === 'chart' ? 'chart' : 'swatch';
-    statusBar.textContent = `${cols} × ${rows} stitches — ${prevLabel} — ${enabledCount}/${paletteItems.length} colors`;
+    pulseStatus(`${cols} × ${rows} stitches — ${prevLabel} — ${enabledCount}/${paletteItems.length} colors`);
   }
 
   function rerenderPreviewFromLastData() {
@@ -745,6 +957,7 @@
     const svg = outputContainer.querySelector('svg');
     if (!svg || !previewViewport) {
       setZoomControlsDisabled(true);
+      selectionOverlay.style.display = 'none';
       return;
     }
 
@@ -766,7 +979,10 @@
 
     if (document.activeElement !== zoomInput) formatZoomField();
     setZoomControlsDisabled(false);
-    requestAnimationFrame(() => updatePreviewPanState());
+    requestAnimationFrame(() => {
+      updatePreviewPanState();
+      updateSelectionOverlay();
+    });
   }
 
   function renderPaletteEditor() {
@@ -1024,4 +1240,7 @@
   }
 
   updateUndoRedoButtons();
+  setCollageControlsState(false);
+  clearSelection();
+  setupInteractiveFeedback();
 })();
