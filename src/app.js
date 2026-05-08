@@ -63,6 +63,7 @@ import {
   const addColorBtn = document.getElementById('addColorBtn');
   const pickerTrigger = document.getElementById('pickerTrigger');
   const pickerPopover = document.getElementById('pickerPopover');
+  const pickerCloseBtn = document.getElementById('pickerCloseBtn');
   const svPlane = document.getElementById('svPlane');
   const svHandle = document.getElementById('svHandle');
   const hueSlider = document.getElementById('hueSlider');
@@ -375,6 +376,12 @@ import {
     e.stopPropagation();
     togglePicker();
   });
+  if (pickerCloseBtn) {
+    pickerCloseBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      closePicker();
+    });
+  }
 
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') closePicker();
@@ -646,6 +653,12 @@ import {
     return null;
   }
 
+  function hasDroppablePayload(dataTransfer) {
+    if (!dataTransfer) return false;
+    const types = Array.from(dataTransfer.types || []);
+    return types.includes('Files') || types.includes('text/uri-list') || types.includes('text/plain');
+  }
+
   function getDroppedImageUrl(dataTransfer) {
     if (!dataTransfer) return '';
     const uriList = dataTransfer.getData('text/uri-list') || '';
@@ -691,9 +704,9 @@ import {
     e => {
       e.preventDefault();
       e.stopPropagation();
-      const file = getFirstImageFile(e.dataTransfer);
-      if (e.dataTransfer) e.dataTransfer.dropEffect = file ? 'copy' : 'none';
-      if (file) canvasArea.classList.add('dragover');
+      const ok = hasDroppablePayload(e.dataTransfer);
+      if (e.dataTransfer) e.dataTransfer.dropEffect = ok ? 'copy' : 'none';
+      canvasArea.classList.toggle('dragover', ok);
     },
     true
   );
@@ -703,9 +716,9 @@ import {
     e => {
       e.preventDefault();
       e.stopPropagation();
-      const file = getFirstImageFile(e.dataTransfer);
-      if (e.dataTransfer) e.dataTransfer.dropEffect = file ? 'copy' : 'none';
-      canvasArea.classList.toggle('dragover', !!file);
+      const ok = hasDroppablePayload(e.dataTransfer);
+      if (e.dataTransfer) e.dataTransfer.dropEffect = ok ? 'copy' : 'none';
+      canvasArea.classList.toggle('dragover', ok);
     },
     true
   );
