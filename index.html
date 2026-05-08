@@ -58,10 +58,13 @@
                   <div class="sv-black"></div>
                   <div class="sv-handle" id="svHandle"></div>
                 </div>
-                <div class="hue-presets" id="huePresets" role="group" aria-label="Hue presets"></div>
-                <div class="hue-wrap">
+                                <div class="hue-wrap">
                   <input type="range" id="hueSlider" min="0" max="360" value="0" />
                   <div class="hue-val" id="hueVal">0°</div>
+                </div>
+                <div class="opacity-wrap">
+                  <input type="range" id="opacitySlider" min="0" max="100" value="100" />
+                  <div class="opacity-val" id="opacityVal">100%</div>
                 </div>
               </div>
             </div>
@@ -118,8 +121,9 @@
             <button type="button" class="btn-toolbar btn-cta-secondary" id="pasteSelectionBtn" disabled title="Paste copied area">Paste</button>
             <label class="download-format-label" for="downloadFormat">Format</label>
             <select id="downloadFormat" class="download-format-select" aria-label="Download file format" disabled>
+              <option value="jpeg" selected>JPEG</option>
+              <option value="png">PNG</option>
               <option value="svg">SVG</option>
-              <option value="jpeg">JPEG</option>
             </select>
             <button type="button" class="btn-primary" id="downloadBtn" disabled>Download</button>
           </div>

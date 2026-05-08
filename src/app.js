@@ -20,7 +20,7 @@ import {
   /* ─── State ──────────────────────────────────────────────── */
   let sourceImage = null;
   let currentStitch = 'knit';
-  let paletteItems = [{ hex: '#ffffff', enabled: true }];
+  let paletteItems = [{ hex: '#ffffff', enabled: true, opacity: 100 }];
   let lastPixelData = null;
   let liveRenderTimer = null;
   let selectedColorIndex = 0;
@@ -67,6 +67,8 @@ import {
   const svHandle = document.getElementById('svHandle');
   const hueSlider = document.getElementById('hueSlider');
   const hueVal = document.getElementById('hueVal');
+  const opacitySlider = document.getElementById('opacitySlider');
+  const opacityVal = document.getElementById('opacityVal');
   const previewViewport = document.getElementById('previewViewport');
   const zoomInBtn = document.getElementById('zoomInBtn');
   const zoomOutBtn = document.getElementById('zoomOutBtn');
@@ -390,6 +392,14 @@ import {
     updateColorFromPicker();
   });
 
+  opacitySlider.addEventListener('input', () => {
+    const v = clampInt(opacitySlider.value, 0, 100, 100);
+    opacitySlider.value = String(v);
+    opacityVal.textContent = `${v}%`;
+    updateOpacitySliderTrack();
+    updateColorFromPicker();
+  });
+
   let svDragging = false;
   svPlane.addEventListener('pointerdown', e => {
     svDragging = true;
@@ -597,6 +607,14 @@ import {
     hiddenInput.click();
   });
 
+  // Fallback: click anywhere on empty canvas to upload.
+  canvasArea.addEventListener('click', e => {
+    if (placeholder.style.display === 'none') return;
+    if (e.target.closest('button, input, select, label')) return;
+    hiddenInput.value = '';
+    hiddenInput.click();
+  });
+
   canvasArea.addEventListener('dblclick', () => {
     hiddenInput.value = '';
     hiddenInput.click();
@@ -626,6 +644,41 @@ import {
       }
     }
     return null;
+  }
+
+  function getDroppedImageUrl(dataTransfer) {
+    if (!dataTransfer) return '';
+    const uriList = dataTransfer.getData('text/uri-list') || '';
+    const plain = dataTransfer.getData('text/plain') || '';
+    const candidate = (uriList.split('\n').find(Boolean) || plain || '').trim();
+    if (!candidate) return '';
+    if (!/^https?:\/\//i.test(candidate)) return '';
+    if (/\.(png|jpe?g|gif|webp|bmp|svg|avif)$/i.test(candidate)) return candidate;
+    return candidate;
+  }
+
+  function loadImageFromUrl(url) {
+    if (!url) return;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = img.width;
+      c.height = img.height;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      c.toBlob(blob => {
+        if (!blob) {
+          pulseStatus('Could not import dropped image URL');
+          return;
+        }
+        const ext = (url.match(/\.(png|jpe?g|gif|webp|bmp|svg|avif)/i) || [,'png'])[1];
+        const f = new File([blob], `dropped-image.${ext.toLowerCase()}`, { type: blob.type || 'image/png' });
+        loadImage(f);
+      });
+    };
+    img.onerror = () => pulseStatus('Could not load dropped image URL');
+    img.src = url;
   }
 
   /**
@@ -675,7 +728,11 @@ import {
       canvasArea.classList.remove('dragover');
       const file = getFirstImageFile(e.dataTransfer);
       if (file) loadImage(file);
-      else pulseStatus('Drop an image file to add it');
+      else {
+        const url = getDroppedImageUrl(e.dataTransfer);
+        if (url) loadImageFromUrl(url);
+        else pulseStatus('Drop an image file to add it');
+      }
     },
     true
   );
@@ -712,7 +769,7 @@ import {
     previewViewport.scrollLeft = 0;
     previewViewport.scrollTop = 0;
     setZoomControlsDisabled(true);
-    paletteItems = [{ hex: '#ffffff', enabled: true }];
+    paletteItems = [{ hex: '#ffffff', enabled: true, opacity: 100 }];
     selectedColorIndex = 0;
     colorCountInput.value = '1';
     colorCountNumberInput.value = '1';
@@ -762,7 +819,11 @@ import {
     for (let i = 0; i < paletteItems.length; i++) {
       const hex = normalizeHex(paletteItems[i].hex);
       const [r, g, b] = hexToRgb(hex);
-      lastPixelData.colorList[i] = paletteItems[i].enabled ? [r, g, b] : [255, 255, 255];
+      const a = Math.max(0, Math.min(100, paletteItems[i].opacity ?? 100)) / 100;
+      const rr = Math.round(r * a + 255 * (1 - a));
+      const gg = Math.round(g * a + 255 * (1 - a));
+      const bb = Math.round(b * a + 255 * (1 - a));
+      lastPixelData.colorList[i] = paletteItems[i].enabled ? [rr, gg, bb] : [255, 255, 255];
     }
     return true;
   }
@@ -909,6 +970,60 @@ import {
     });
   }
 
+  function downloadSvgAsPng(svgEl) {
+    return new Promise((resolve, reject) => {
+      const wAttr = svgEl.getAttribute('width');
+      const hAttr = svgEl.getAttribute('height');
+      const vb = svgEl.viewBox && svgEl.viewBox.baseVal;
+      let w = wAttr ? parseFloat(wAttr) : NaN;
+      let h = hAttr ? parseFloat(hAttr) : NaN;
+      if (!Number.isFinite(w) || w <= 0) {
+        if (vb && vb.width > 0) w = vb.width;
+        else if (lastPixelData) w = lastPixelData.cols * lastPixelData.stitchSize;
+        else w = 300;
+      }
+      if (!Number.isFinite(h) || h <= 0) {
+        if (vb && vb.height > 0) h = vb.height;
+        else if (lastPixelData) h = lastPixelData.rows * lastPixelData.stitchSize;
+        else h = 300;
+      }
+      w = Math.min(8192, Math.max(1, Math.round(w)));
+      h = Math.min(8192, Math.max(1, Math.round(h)));
+
+      const xml = serializeSvgString(svgEl);
+      const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        // PNG keeps transparent background for easier reuse.
+        try {
+          ctx.drawImage(img, 0, 0, w, h);
+        } catch (err) {
+          URL.revokeObjectURL(url);
+          reject(err);
+          return;
+        }
+        canvas.toBlob(
+          out => {
+            URL.revokeObjectURL(url);
+            if (out) resolve(out);
+            else reject(new Error('toBlob failed'));
+          },
+          'image/png'
+        );
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('svg raster failed'));
+      };
+      img.src = url;
+    });
+  }
+
   function downloadActive() {
     if (!lastPixelData) return;
 
@@ -916,12 +1031,24 @@ import {
     if (!svgEl) return;
 
     const tag = previewMode === 'chart' ? 'chart' : 'swatch';
-    const wantJpeg = downloadFormatSelect && downloadFormatSelect.value === 'jpeg';
+    const format = downloadFormatSelect ? downloadFormatSelect.value : 'jpeg';
 
-    if (!wantJpeg) {
+    if (format === 'svg') {
       const xml = serializeSvgString(svgEl);
       const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
       triggerDownloadBlob(blob, `knit-artwork-${tag}.svg`);
+      return;
+    }
+
+    if (format === 'png') {
+      downloadSvgAsPng(svgEl).then(
+        blob => triggerDownloadBlob(blob, `knit-artwork-${tag}.png`),
+        () => {
+          const xml = serializeSvgString(svgEl);
+          const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
+          triggerDownloadBlob(blob, `knit-artwork-${tag}.svg`);
+        }
+      );
       return;
     }
 
@@ -1017,13 +1144,38 @@ import {
       chip.className = 'palette-chip';
       chip.style.background = item.hex;
 
-      const hexLabel = document.createElement('div');
-      hexLabel.className = 'palette-hex';
-      hexLabel.textContent = item.hex.slice(1).toUpperCase();
+      const hexWrap = document.createElement('div');
+      hexWrap.className = 'palette-hex-wrap';
+
+      const hexInput = document.createElement('input');
+      hexInput.type = 'text';
+      hexInput.className = 'palette-hex-input';
+      hexInput.value = normalizeHex(item.hex).toUpperCase();
+      hexInput.spellcheck = false;
+      hexInput.autocomplete = 'off';
+      hexInput.title = 'Type any hex color (e.g. #FF6A7A)';
+      hexInput.addEventListener('click', e => e.stopPropagation());
+      hexInput.addEventListener('input', e => {
+        e.stopPropagation();
+        const val = hexInput.value.trim();
+        if (!/^#?[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(val)) return;
+        pushUndoHistory();
+        paletteItems[idx].hex = normalizeHex(val);
+        if (sourceImage && lastPixelData) {
+          if (applyPaletteColorsToLastPixelData()) rerenderPreviewFromLastData();
+          else scheduleLiveRender();
+        }
+        renderPaletteEditor();
+      });
+      hexInput.addEventListener('blur', () => {
+        hexInput.value = normalizeHex(paletteItems[idx].hex).toUpperCase();
+      });
+
+      hexWrap.appendChild(hexInput);
 
       const strength = document.createElement('div');
       strength.className = 'palette-strength';
-      strength.textContent = '100 %';
+      strength.textContent = `${Math.max(0, Math.min(100, item.opacity ?? 100))} %`;
 
       const eyeBtn = document.createElement('button');
       eyeBtn.className = `eye-btn ${item.enabled ? '' : 'off'}`.trim();
@@ -1066,7 +1218,7 @@ import {
       actionGroup.appendChild(removeBtn);
 
       row.appendChild(chip);
-      row.appendChild(hexLabel);
+      row.appendChild(hexWrap);
       row.appendChild(strength);
       row.appendChild(actionGroup);
       paletteEditor.appendChild(row);
@@ -1082,7 +1234,7 @@ import {
     sctx.drawImage(sourceImage, 0, 0, sample.width, sample.height);
     const imgData = sctx.getImageData(0, 0, sample.width, sample.height);
     const centers = kMeansColors(imgData, safeCount);
-    return centers.map(([r, g, b]) => ({ hex: rgbToHex(r, g, b), enabled: true }));
+    return centers.map(([r, g, b]) => ({ hex: rgbToHex(r, g, b), enabled: true, opacity: 100 }));
   }
 
   function clampInt(value, min, max, fallback) {
@@ -1103,7 +1255,11 @@ import {
     }
     pickerSat = s;
     pickerVal = v;
+    const op = clampInt(selected.opacity ?? 100, 0, 100, 100);
+    opacitySlider.value = String(op);
+    opacityVal.textContent = `${op}%`;
     syncPlaneColor();
+    updateOpacitySliderTrack();
     updateSVHandle();
 
     pickerTrigger.style.background = selected.hex;
@@ -1130,10 +1286,20 @@ import {
     svHandle.style.top = `${100 - pickerVal}%`;
   }
 
+  function updateOpacitySliderTrack() {
+    const hue = parseInt(hueSlider.value, 10);
+    const opaque = `hsl(${hue}, ${Math.max(20, pickerSat)}%, ${Math.max(25, pickerVal * 0.5)}%)`;
+    opacitySlider.style.background =
+      `linear-gradient(45deg, rgba(0,0,0,.06) 25%, transparent 25%) 0 0 / 8px 8px,` +
+      `linear-gradient(-45deg, rgba(0,0,0,.06) 25%, transparent 25%) 0 0 / 8px 8px,` +
+      `linear-gradient(to right, rgba(120,120,120,0), ${opaque})`;
+  }
+
   function updateColorFromPicker() {
     if (!paletteItems.length) return;
     const hue = parseInt(hueSlider.value, 10);
     paletteItems[selectedColorIndex].hex = normalizeHex(hsvToHex(hue, pickerSat, pickerVal));
+    paletteItems[selectedColorIndex].opacity = clampInt(opacitySlider.value, 0, 100, 100);
     if (sourceImage && lastPixelData) {
       if (applyPaletteColorsToLastPixelData()) rerenderPreviewFromLastData();
       else scheduleLiveRender();
@@ -1220,26 +1386,6 @@ import {
     colorCountInput.value = String(cc);
     colorCountNumberInput.value = String(cc);
     colorCountVal.textContent = String(cc);
-  }
-
-  const huePresets = document.getElementById('huePresets');
-  if (huePresets) {
-    for (let i = 0; i < 12; i++) {
-      const seg = document.createElement('button');
-      seg.type = 'button';
-      seg.className = 'hue-preset-seg';
-      const hue = i * 30;
-      seg.style.background = `hsl(${hue}, 100%, 50%)`;
-      seg.title = `${hue}°`;
-      seg.addEventListener('click', e => {
-        e.stopPropagation();
-        hueSlider.value = String(hue);
-        hueVal.textContent = `${hue}°`;
-        syncPlaneColor();
-        updateColorFromPicker();
-      });
-      huePresets.appendChild(seg);
-    }
   }
 
   updateUndoRedoButtons();

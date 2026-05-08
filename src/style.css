@@ -215,10 +215,13 @@ body::after {
   /* Let the color picker popover (SV plane) paint outside the card; inner list still scrolls. */
   overflow: visible;
   position: relative;
+  z-index: 12;
 }
 
 .panel-card--options {
   flex: 0 0 auto;
+  position: relative;
+  z-index: 2;
 }
 
 .panel-card--options .status-bar {
@@ -368,9 +371,11 @@ body::after {
 .picker-popover {
   position: absolute;
   left: 0;
-  right: 0;
+  right: auto;
+  width: min(360px, calc(100vw - 3rem));
+  max-width: 100%;
   margin-top: 8px;
-  z-index: 30;
+  z-index: 60;
   display: none;
 }
 
@@ -400,12 +405,15 @@ body::after {
   gap: 8px;
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12);
   min-width: 0;
+  max-height: min(68vh, 520px);
+  overflow-y: auto;
 }
 
 .sv-plane {
   width: 100%;
+  height: clamp(170px, 34vh, 300px);
   min-height: 140px;
-  aspect-ratio: 1 / 1;
+  aspect-ratio: auto;
   flex-shrink: 0;
   border-radius: 8px;
   position: relative;
@@ -413,28 +421,8 @@ body::after {
   overflow: hidden;
 }
 
-.hue-presets {
-  display: flex;
-  gap: 3px;
-  width: 100%;
-  height: 14px;
-  flex-shrink: 0;
-}
 
-.hue-preset-seg {
-  flex: 1 1 0;
-  min-width: 0;
-  height: 100%;
-  padding: 0;
-  border: 0.5px solid var(--border-light);
-  border-radius: 3px;
-  cursor: pointer;
-}
 
-.hue-preset-seg:hover {
-  filter: brightness(1.08);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
-}
 
 .sv-white,
 .sv-black {
@@ -494,6 +482,66 @@ body::after {
   text-align: right;
 }
 
+.opacity-wrap {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+#opacitySlider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  border: 0.5px solid var(--border-light);
+  background:
+    linear-gradient(45deg, rgba(0,0,0,.06) 25%, transparent 25%) 0 0 / 8px 8px,
+    linear-gradient(-45deg, rgba(0,0,0,.06) 25%, transparent 25%) 0 0 / 8px 8px,
+    linear-gradient(to right, rgba(120,120,120,0), rgba(120,120,120,1));
+}
+
+#opacitySlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.28);
+}
+
+.opacity-val {
+  font-size: 11px;
+  color: var(--text-secondary);
+  min-width: 44px;
+  text-align: right;
+}
+
+@media (max-width: 900px) {
+  .picker-popover {
+    width: min(340px, calc(100vw - 2rem));
+  }
+
+  .figma-picker {
+    max-height: min(56vh, 430px);
+  }
+
+  .sv-plane {
+    height: clamp(150px, 28vh, 240px);
+  }
+}
+
+@media (max-height: 820px) {
+  .figma-picker {
+    max-height: 50vh;
+  }
+
+  .sv-plane {
+    height: clamp(140px, 24vh, 210px);
+  }
+}
+
 .palette-editor {
   display: flex;
   flex-direction: column;
@@ -538,6 +586,32 @@ body::after {
   letter-spacing: 0.04em;
   color: var(--text-primary);
   font-weight: 500;
+}
+
+.palette-hex-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.palette-hex-input {
+  width: 100%;
+  min-width: 82px;
+  border: 0.5px solid var(--border-light);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 4px 6px;
+}
+
+.palette-hex-input:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--cta-secondary) 58%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cta-secondary) 20%, transparent);
 }
 
 .palette-strength {
