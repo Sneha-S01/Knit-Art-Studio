@@ -28,6 +28,7 @@
   --font-display: 'Public Sans', system-ui, -apple-system, sans-serif;
   --font-body: 'Inter', system-ui, -apple-system, sans-serif;
   --workspace-col-height: clamp(300px, 60vh, 660px);
+  --cursor-eyedropper: url('/eyedropper-icon.png') 5 27, crosshair;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -347,18 +348,18 @@ body::after {
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(calc(260px - 1cm), calc(320px - 1cm));
   gap: 20px;
   align-items: stretch;
 }
 
 @media (min-width: 1100px) {
   .workspace {
-    grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(calc(280px - 1cm), calc(340px - 1cm));
   }
 }
 
-/* ─── Design column (matches preview column height) ─────────── */
+/* ─── Settings sidebar (matches canvas column height) ───────── */
 .panel-column {
   display: flex;
   flex-direction: column;
@@ -523,6 +524,34 @@ body::after {
 }
 
 
+/* ─── Chart fill (selection) ─────────────────────────────────── */
+.chart-fill-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.chart-fill-block[hidden] {
+  display: none !important;
+}
+
+.chart-fill-label {
+  margin: 0;
+  font-size: 16px;
+}
+
+.chart-fill-row-trailing {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.chart-fill-row.disabled {
+  opacity: 0.5;
+}
+
 /* ─── Palette Editor ────────────────────────────────────────── */
 .palette-section-header {
   display: flex;
@@ -580,9 +609,9 @@ body::after {
 
 .picker-popover {
   position: absolute;
-  left: 0;
-  right: auto;
-  width: min(360px, calc(100vw - 3rem));
+  right: 0;
+  left: auto;
+  width: min(calc(360px - 1cm), calc(100vw - 3rem));
   max-width: 100%;
   margin-top: 8px;
   z-index: 60;
@@ -632,6 +661,44 @@ body::after {
   font-weight: 600;
   letter-spacing: -0.02em;
   color: var(--text-primary);
+}
+
+.picker-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.picker-tool-btn {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+}
+
+.picker-tool-btn:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.picker-tool-btn.active {
+  background: var(--accent);
+  color: var(--bg-primary);
+}
+
+.picker-eyedropper-icon {
+  display: block;
+  width: 16px;
+  height: 16px;
+  background-color: currentColor;
+  -webkit-mask: url('/eyedropper-icon.png') center / contain no-repeat;
+  mask: url('/eyedropper-icon.png') center / contain no-repeat;
 }
 
 .picker-close-btn {
@@ -1101,8 +1168,9 @@ body::after {
   100% { opacity: 1; transform: translateY(0); }
 }
 
-/* ─── Right Column ──────────────────────────────────────────── */
-.right-col {
+/* ─── Canvas column ─────────────────────────────────────────── */
+.right-col,
+.canvas-col {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1238,6 +1306,10 @@ body::after {
   flex-shrink: 0;
 }
 
+.chart-select-tool-btn[hidden] {
+  display: none !important;
+}
+
 button:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-muted) 35%, transparent);
@@ -1280,6 +1352,73 @@ button:focus-visible {
   pointer-events: none;
   z-index: 6;
   display: none;
+}
+
+.chart-selection-layer {
+  position: absolute;
+  pointer-events: none;
+  z-index: 6;
+  display: none;
+  overflow: visible;
+}
+
+.chart-selection-layer svg {
+  display: block;
+  overflow: visible;
+}
+
+.chart-sel-fill {
+  fill: rgba(0, 120, 215, 0.14);
+  fill-rule: evenodd;
+  stroke: none;
+}
+
+.chart-sel-ants-w,
+.chart-sel-ants-b {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linejoin: miter;
+  stroke-linecap: butt;
+  stroke-dasharray: 4 3;
+  animation: chart-marching-ants 0.45s linear infinite;
+}
+
+body.eyedropper-active .canvas-area,
+body.eyedropper-active .preview-viewport,
+body.eyedropper-active .preview-viewport svg,
+body.eyedropper-active #outputContainer {
+  cursor: var(--cursor-eyedropper) !important;
+}
+
+.chart-sel-ants-w {
+  stroke: #fff;
+}
+
+.chart-sel-ants-b {
+  stroke: #000;
+  animation-delay: 0.225s;
+}
+
+@keyframes chart-marching-ants {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: 14;
+  }
+}
+
+.preview-viewport.preview-viewport--chart-select {
+  cursor: crosshair;
+}
+
+.preview-viewport.preview-viewport--chart-select.preview-viewport--pannable {
+  cursor: grab;
+}
+
+.preview-viewport.preview-viewport--chart-select.preview-viewport--pannable.is-panning,
+.preview-viewport.preview-viewport--chart-select.is-chart-panning {
+  cursor: grabbing;
 }
 
 .palette-editor-scroll::-webkit-scrollbar,

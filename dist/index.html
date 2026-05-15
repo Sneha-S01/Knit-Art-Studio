@@ -14,6 +14,8 @@
         y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
     })(window, document, "clarity", "script", "wpx1z39cq3");
   </script>
+  <script type="module" crossorigin src="/assets/index-D0qtoMU4.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-Dl6s0avA.css">
 </head>
 <body>
   <div id="app">
@@ -23,62 +25,7 @@
     </div>
 
     <div class="workspace">
-      <!-- Canvas column -->
-      <div class="right-col">
-        <div class="canvas-toolbar">
-          <div class="canvas-toolbar-right">
-            <button type="button" class="btn-toolbar btn-mini btn-icon chart-select-tool-btn" id="chartSelectToolBtn" hidden title="Select stitches (click or drag)" aria-label="Select stitches" aria-pressed="false">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
-                <path d="M5 3l14 9.5-6.2.4 2.8 7.3-2.4 1-2.8-7.4L5 20.5V3z"/>
-              </svg>
-            </button>
-            <button type="button" class="btn-toolbar btn-mini btn-icon" id="undoBtn" disabled title="Undo (⌘Z)" aria-label="Undo">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M3 7v6h6" />
-                <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
-              </svg>
-            </button>
-            <button type="button" class="btn-toolbar btn-mini btn-icon" id="redoBtn" disabled title="Redo (⇧⌘Z)" aria-label="Redo">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M21 7v6h-6" />
-                <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" />
-              </svg>
-            </button>
-            <div class="zoom-controls" id="zoomControls" aria-label="Preview zoom">
-              <button type="button" class="btn-toolbar btn-mini zoom-btn" id="zoomOutBtn" title="Zoom out" disabled>−</button>
-              <input type="text" class="zoom-input" id="zoomInput" value="100%" inputmode="decimal" spellcheck="false" autocomplete="off" aria-label="Zoom percent" title="Type zoom (25–400)" disabled />
-              <button type="button" class="btn-toolbar btn-mini zoom-btn" id="zoomInBtn" title="Zoom in" disabled>+</button>
-            </div>
-            <button type="button" class="btn-toolbar" id="clearImageBtn" disabled title="Remove image from preview">Remove image</button>
-            <button type="button" class="btn-primary btn-download-toolbar" id="downloadBtn" disabled>Download</button>
-          </div>
-        </div>
-        <div class="canvas-area" id="canvasArea">
-          <div class="preview-viewport" id="previewViewport">
-          <div class="canvas-placeholder" id="placeholder">
-            <svg class="placeholder-art" viewBox="0 0 100 100" fill="none">
-              <rect x="8" y="8" width="84" height="84" rx="6" stroke="currentColor" stroke-width="1" stroke-dasharray="5 3"/>
-              <g opacity=".5">
-                <path d="M22 42 Q27 37 32 42 Q37 47 42 42 Q47 37 52 42 Q57 47 62 42 Q67 37 72 42" stroke="currentColor" stroke-width="1.3" fill="none"/>
-                <path d="M22 54 Q27 49 32 54 Q37 59 42 54 Q47 49 52 54 Q57 59 62 54 Q67 49 72 54" stroke="currentColor" stroke-width="1.3" fill="none"/>
-                <path d="M22 66 Q27 61 32 66 Q37 71 42 66 Q47 61 52 66 Q57 71 62 66 Q67 61 72 66" stroke="currentColor" stroke-width="1.3" fill="none"/>
-              </g>
-              <circle cx="50" cy="30" r="12" stroke="currentColor" stroke-width="1" opacity=".3"/>
-            </svg>
-            <p>Drop an image here or click to browse</p>
-          </div>
-
-          <div id="outputContainer"></div>
-
-          <div id="chartSelectionLayer" class="chart-selection-layer" aria-hidden="true"></div>
-
-          <div class="processing-overlay" id="processingOverlay">
-            <div class="spinner"></div>
-            <p id="processingMsg">Weaving stitches...</p>
-          </div>
-          </div>
-        </div>
-      </div>      <!-- Settings sidebar -->
+      <!-- Design column: design card + options card (matches preview column height) -->
       <div class="panel-column">
         <div class="panel-card panel-card--design">
           <div class="panel-section">
@@ -136,7 +83,12 @@
                   <span class="picker-title">Color</span>
                   <div class="picker-header-actions">
                     <button type="button" class="picker-tool-btn" id="pickerEyedropperBtn" title="Pick color from pattern" aria-label="Eyedropper">
-                      <span class="picker-eyedropper-icon" aria-hidden="true"></span>
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M3 21l3.75-3.75"/>
+                        <path d="M14 4l6 6"/>
+                        <path d="M8 10L18 20"/>
+                        <path d="M9.5 8.5l2 2"/>
+                      </svg>
                     </button>
                     <button type="button" class="picker-close-btn" id="pickerCloseBtn" aria-label="Close color picker">×</button>
                   </div>
@@ -177,7 +129,62 @@
         </div>
       </div>
 
+      <!-- Right Column -->
+      <div class="right-col">
+        <div class="canvas-toolbar">
+          <div class="canvas-toolbar-right">
+            <button type="button" class="btn-toolbar btn-mini btn-icon chart-select-tool-btn" id="chartSelectToolBtn" hidden title="Select stitches (click or drag)" aria-label="Select stitches" aria-pressed="false">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+                <path d="M5 3l14 9.5-6.2.4 2.8 7.3-2.4 1-2.8-7.4L5 20.5V3z"/>
+              </svg>
+            </button>
+            <button type="button" class="btn-toolbar btn-mini btn-icon" id="undoBtn" disabled title="Undo (⌘Z)" aria-label="Undo">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 7v6h6" />
+                <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+              </svg>
+            </button>
+            <button type="button" class="btn-toolbar btn-mini btn-icon" id="redoBtn" disabled title="Redo (⇧⌘Z)" aria-label="Redo">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 7v6h-6" />
+                <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" />
+              </svg>
+            </button>
+            <div class="zoom-controls" id="zoomControls" aria-label="Preview zoom">
+              <button type="button" class="btn-toolbar btn-mini zoom-btn" id="zoomOutBtn" title="Zoom out" disabled>−</button>
+              <input type="text" class="zoom-input" id="zoomInput" value="100%" inputmode="decimal" spellcheck="false" autocomplete="off" aria-label="Zoom percent" title="Type zoom (25–400)" disabled />
+              <button type="button" class="btn-toolbar btn-mini zoom-btn" id="zoomInBtn" title="Zoom in" disabled>+</button>
+            </div>
+            <button type="button" class="btn-toolbar" id="clearImageBtn" disabled title="Remove image from preview">Remove image</button>
+            <button type="button" class="btn-primary btn-download-toolbar" id="downloadBtn" disabled>Download</button>
+          </div>
+        </div>
+        <div class="canvas-area" id="canvasArea">
+          <div class="preview-viewport" id="previewViewport">
+          <div class="canvas-placeholder" id="placeholder">
+            <svg class="placeholder-art" viewBox="0 0 100 100" fill="none">
+              <rect x="8" y="8" width="84" height="84" rx="6" stroke="currentColor" stroke-width="1" stroke-dasharray="5 3"/>
+              <g opacity=".5">
+                <path d="M22 42 Q27 37 32 42 Q37 47 42 42 Q47 37 52 42 Q57 47 62 42 Q67 37 72 42" stroke="currentColor" stroke-width="1.3" fill="none"/>
+                <path d="M22 54 Q27 49 32 54 Q37 59 42 54 Q47 49 52 54 Q57 59 62 54 Q67 49 72 54" stroke="currentColor" stroke-width="1.3" fill="none"/>
+                <path d="M22 66 Q27 61 32 66 Q37 71 42 66 Q47 61 52 66 Q57 71 62 66 Q67 61 72 66" stroke="currentColor" stroke-width="1.3" fill="none"/>
+              </g>
+              <circle cx="50" cy="30" r="12" stroke="currentColor" stroke-width="1" opacity=".3"/>
+            </svg>
+            <p>Drop an image here or click to browse</p>
+          </div>
 
+          <div id="outputContainer"></div>
+
+          <div id="chartSelectionLayer" class="chart-selection-layer" aria-hidden="true"></div>
+
+          <div class="processing-overlay" id="processingOverlay">
+            <div class="spinner"></div>
+            <p id="processingMsg">Weaving stitches...</p>
+          </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
   <input type="file" id="hiddenInput" accept="image/*" />
@@ -224,6 +231,5 @@
       </div>
     </div>
   </div>
-
-  <script type="module" src="src/app.js"></script></body>
+</body>
 </html>

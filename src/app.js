@@ -31,8 +31,23 @@ import {
   let previewMode = 'swatch';
   /** User zoom multiplier on top of fit-to-viewport (1 = fitted). */
   let previewZoom = 1;
-  const MAX_PALETTE_COLORS = 10;
+  const MAX_PALETTE_COLORS = 25;
   let resetPreviewScrollNext = false;
+
+  /** Chart-only stitch cell selection (keys: "col,row"). */
+  const chartCellSelection = new Set();
+  let chartSelecting = false;
+  let chartSelectPointerId = null;
+  let chartSelectAnchor = null;
+  /** @type {Set<string>|null} */
+  let chartSelectBaseSelection = null;
+  let chartSpaceHeld = false;
+  let chartPickerPaintUndoPushed = false;
+  let chartSelectToolEnabled = false;
+  let chartFill = { hex: '#ffffff', enabled: true, opacity: 100 };
+  let chartFillPickerActive = false;
+  let chartSelectionOverlayRaf = 0;
+  let eyedropperActive = false;
 
   /** @type {Array<ReturnType<typeof captureEditorState>>} */
   let undoStack = [];
@@ -47,6 +62,13 @@ import {
   const downloadBtn = document.getElementById('downloadBtn');
   const previewKnitBtn = document.getElementById('previewKnitBtn');
   const previewChartBtn = document.getElementById('previewChartBtn');
+  const chartSelectToolBtn = document.getElementById('chartSelectToolBtn');
+  const chartFillBlock = document.getElementById('chartFillBlock');
+  const chartFillRow = document.getElementById('chartFillRow');
+  const chartFillChip = document.getElementById('chartFillChip');
+  const chartFillHexInput = document.getElementById('chartFillHexInput');
+  const chartFillEyeBtn = document.getElementById('chartFillEyeBtn');
+  const chartFillAddBtn = document.getElementById('chartFillAddBtn');
   const processingOverlay = document.getElementById('processingOverlay');
   const processingMsg = document.getElementById('processingMsg');
   const canvasArea = document.getElementById('canvasArea');
@@ -61,6 +83,7 @@ import {
   const addColorBtn = document.getElementById('addColorBtn');
   const pickerPopover = document.getElementById('pickerPopover');
   const pickerCloseBtn = document.getElementById('pickerCloseBtn');
+  const pickerEyedropperBtn = document.getElementById('pickerEyedropperBtn');
   const svPlane = document.getElementById('svPlane');
   const svHandle = document.getElementById('svHandle');
   const hueSlider = document.getElementById('hueSlider');
@@ -68,6 +91,7 @@ import {
   const opacitySlider = document.getElementById('opacitySlider');
   const opacityVal = document.getElementById('opacityVal');
   const previewViewport = document.getElementById('previewViewport');
+  const chartSelectionLayer = document.getElementById('chartSelectionLayer');
   const zoomInBtn = document.getElementById('zoomInBtn');
   const zoomOutBtn = document.getElementById('zoomOutBtn');
   const zoomInput = document.getElementById('zoomInput');
@@ -259,12 +283,50 @@ import {
   if (pickerCloseBtn) {
     pickerCloseBtn.addEventListener('click', e => {
       e.stopPropagation();
+      setEyedropperActive(false);
       closePicker();
     });
   }
 
+  if (pickerEyedropperBtn) {
+    pickerEyedropperBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      setEyedropperActive(!eyedropperActive);
+    });
+  }
+
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closePicker();
+    if (e.target.closest('input, textarea, select')) return;
+    if (e.code === 'Space') {
+      chartSpaceHeld = true;
+      if (previewMode === 'chart') e.preventDefault();
+      updatePreviewPanState();
+    }
+    if (e.key === 'Escape') {
+      if (eyedropperActive) {
+        setEyedropperActive(false);
+        e.preventDefault();
+        return;
+      }
+      if (isChartSelectToolActive() && chartCellSelection.size > 0) {
+        clearChartCellSelection();
+        e.preventDefault();
+        return;
+      }
+      if (isChartSelectToolActive()) {
+        setChartSelectToolEnabled(false);
+        e.preventDefault();
+        return;
+      }
+      closePicker();
+    }
+  });
+
+  document.addEventListener('keyup', e => {
+    if (e.code === 'Space') {
+      chartSpaceHeld = false;
+      updatePreviewPanState();
+    }
   });
 
   document.addEventListener('pointerdown', e => {
@@ -274,12 +336,20 @@ import {
   });
 
   hueSlider.addEventListener('input', () => {
+    if (chartFillPickerActive && hasChartCellSelection() && !chartPickerPaintUndoPushed) {
+      pushUndoHistory();
+      chartPickerPaintUndoPushed = true;
+    }
     hueVal.textContent = `${hueSlider.value}°`;
     syncPlaneColor();
     updateColorFromPicker();
   });
 
   opacitySlider.addEventListener('input', () => {
+    if (chartFillPickerActive && hasChartCellSelection() && !chartPickerPaintUndoPushed) {
+      pushUndoHistory();
+      chartPickerPaintUndoPushed = true;
+    }
     const v = clampInt(opacitySlider.value, 0, 100, 100);
     opacitySlider.value = String(v);
     opacityVal.textContent = `${v}%`;
@@ -290,6 +360,11 @@ import {
   let svDragging = false;
   svPlane.addEventListener('pointerdown', e => {
     svDragging = true;
+    chartPickerPaintUndoPushed = false;
+    if (chartFillPickerActive && hasChartCellSelection()) {
+      pushUndoHistory();
+      chartPickerPaintUndoPushed = true;
+    }
     svPlane.setPointerCapture(e.pointerId);
     updateSVFromPointer(e);
   });
@@ -299,6 +374,7 @@ import {
   });
   svPlane.addEventListener('pointerup', e => {
     svDragging = false;
+    chartPickerPaintUndoPushed = false;
     svPlane.releasePointerCapture(e.pointerId);
   });
 
@@ -364,35 +440,468 @@ import {
   let previewPanScrollTop = 0;
 
   function updatePreviewPanState() {
-    if (!previewViewport || !outputContainer.querySelector('svg')) {
-      previewViewport.classList.remove('preview-viewport--pannable');
+    if (!previewViewport) return;
+    const svg = outputContainer.querySelector('svg');
+    const el = previewViewport;
+    if (!svg) {
+      el.classList.remove('preview-viewport--pannable', 'preview-viewport--chart-select');
       return;
     }
-    const el = previewViewport;
     const can =
       el.scrollWidth > el.clientWidth + 2 || el.scrollHeight > el.clientHeight + 2;
-    el.classList.toggle('preview-viewport--pannable', can);
+    const chartSelectActive = isChartSelectToolActive();
+    el.classList.toggle('preview-viewport--chart-select', chartSelectActive);
+    const chartBlocksPan = previewMode === 'chart' && chartSelectToolEnabled;
+    const allowPanCursor = can && (!chartBlocksPan || chartSpaceHeld);
+    el.classList.toggle('preview-viewport--pannable', allowPanCursor);
   }
 
+  function isChartSelectToolActive() {
+    return previewMode === 'chart' && chartSelectToolEnabled;
+  }
+
+  function setChartSelectToolEnabled(on) {
+    chartSelectToolEnabled = !!on;
+    if (!chartSelectToolEnabled) clearChartCellSelection();
+    updateChartSelectToolUI();
+    updatePreviewPanState();
+  }
+
+  function updateChartSelectToolUI() {
+    if (!chartSelectToolBtn) return;
+    const show = previewMode === 'chart' && !!sourceImage;
+    chartSelectToolBtn.hidden = !show;
+    chartSelectToolBtn.classList.toggle('active', chartSelectToolEnabled);
+    chartSelectToolBtn.setAttribute('aria-pressed', chartSelectToolEnabled ? 'true' : 'false');
+    chartSelectToolBtn.disabled = !show;
+  }
+
+  function clearChartCellSelection() {
+    chartCellSelection.clear();
+    chartSelecting = false;
+    chartSelectAnchor = null;
+    chartSelectBaseSelection = null;
+    chartFillPickerActive = false;
+    syncChartSelectionOverlay();
+  }
+
+  function resetChartFill() {
+    chartFill = { hex: '#ffffff', enabled: true, opacity: 100 };
+    chartFillPickerActive = false;
+    syncChartFillRowUI();
+  }
+
+  function updateChartFillSection() {
+    const show = isChartSelectToolActive() && chartCellSelection.size > 0;
+    if (chartFillBlock) chartFillBlock.hidden = !show;
+    if (show) syncChartFillRowUI();
+  }
+
+  function syncChartFillRowUI() {
+    if (!chartFillChip || !chartFillHexInput || !chartFillEyeBtn || !chartFillRow) return;
+    const hex = normalizeHex(chartFill.hex);
+    const displayHex = chartFill.enabled ? hex : '#ffffff';
+    chartFillChip.style.background = displayHex;
+    chartFillHexInput.value = displayHex.toUpperCase();
+    chartFillRow.classList.toggle('disabled', !chartFill.enabled);
+    chartFillEyeBtn.classList.toggle('off', !chartFill.enabled);
+    chartFillEyeBtn.title = chartFill.enabled ? 'Hide fill on selection' : 'Show fill on selection';
+    chartFillEyeBtn.innerHTML = chartFill.enabled
+      ? `<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 10s3-6 8-6 8 6 8 6-3 6-8 6-8-6-8-6Z"/><circle cx="10" cy="10" r="2.6"/></svg>`
+      : `<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 3l14 14"/><path d="M2 10s3-6 8-6c1.7 0 3.2.6 4.5 1.5"/><path d="M18 10s-3 6-8 6c-1.7 0-3.2-.6-4.5-1.5"/></svg>`;
+    if (chartFillAddBtn) {
+      chartFillAddBtn.disabled = paletteItems.length >= MAX_PALETTE_COLORS;
+    }
+  }
+
+  function findNearestPaletteIndex(hex) {
+    const [tr, tg, tb] = hexToRgb(normalizeHex(hex));
+    let best = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < paletteItems.length; i++) {
+      const [r, g, b] = hexToRgb(normalizeHex(paletteItems[i].hex));
+      const d = (r - tr) ** 2 + (g - tg) ** 2 + (b - tb) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  function resolvePaletteIndexForFill() {
+    const hex = chartFill.enabled ? normalizeHex(chartFill.hex) : '#ffffff';
+    let idx = paletteItems.findIndex(p => normalizeHex(p.hex) === hex);
+    if (idx >= 0) return idx;
+    if (paletteItems.length >= MAX_PALETTE_COLORS) return findNearestPaletteIndex(hex);
+    paletteItems.push({
+      hex,
+      enabled: true,
+      opacity: chartFill.opacity ?? 100,
+    });
+    const count = paletteItems.length;
+    colorCountInput.value = String(count);
+    colorCountNumberInput.value = String(count);
+    return paletteItems.length - 1;
+  }
+
+  function applyChartFillToSelection({ recordUndo = true } = {}) {
+    if (!lastPixelData || chartCellSelection.size === 0) return;
+    const paletteIndex = resolvePaletteIndexForFill();
+    if (recordUndo) pushUndoHistory();
+    for (const key of chartCellSelection) {
+      const [col, row] = key.split(',').map(Number);
+      lastPixelData.grid[row][col] = paletteIndex;
+    }
+    if (applyPaletteColorsToLastPixelData()) rerenderPreviewFromLastData();
+    renderPaletteEditor();
+    syncChartFillRowUI();
+  }
+
+  function openChartFillPicker() {
+    chartFillPickerActive = true;
+    syncPickerFromChartFill();
+    openPicker();
+  }
+
+  function syncPickerFromChartFill() {
+    const hex = chartFill.enabled ? chartFill.hex : '#ffffff';
+    const [r, g, b] = hexToRgb(normalizeHex(hex));
+    const [h, s, v] = rgbToHsv(r, g, b);
+    if (s >= 0.5) {
+      hueSlider.value = String(Math.round(h));
+      hueVal.textContent = `${Math.round(h)}°`;
+    }
+    pickerSat = s;
+    pickerVal = v;
+    const op = clampInt(chartFill.opacity ?? 100, 0, 100, 100);
+    opacitySlider.value = String(op);
+    opacityVal.textContent = `${op}%`;
+    syncPlaneColor();
+    updateOpacitySliderTrack();
+    updateSVHandle();
+  }
+
+  function getGridCellFromPointer(e) {
+    if (!lastPixelData) return null;
+    const svg = outputContainer.querySelector('svg');
+    if (!svg) return null;
+    const { cols, rows } = lastPixelData;
+    const rect = svg.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    if (x < 0 || y < 0 || x >= rect.width || y >= rect.height) return null;
+    const col = Math.min(cols - 1, Math.max(0, Math.floor((x / rect.width) * cols)));
+    const row = Math.min(rows - 1, Math.max(0, Math.floor((y / rect.height) * rows)));
+    return { col, row };
+  }
+
+  function getChartCellFromPointer(e) {
+    if (previewMode !== 'chart') return null;
+    return getGridCellFromPointer(e);
+  }
+
+  function buildSelectionPaths(selected, stitchSize) {
+    if (!selected.size) return { fillD: '', outlineD: '' };
+
+    let fillD = '';
+    const has = (c, r) => selected.has(`${c},${r}`);
+    const segments = [];
+
+    for (const key of selected) {
+      const [col, row] = key.split(',').map(Number);
+      const x = col * stitchSize;
+      const y = row * stitchSize;
+      const s = stitchSize;
+      fillD += `M ${x} ${y} h ${s} v ${s} h ${-s} Z `;
+      if (!has(col, row - 1)) segments.push([x, y, x + s, y]);
+      if (!has(col + 1, row)) segments.push([x + s, y, x + s, y + s]);
+      if (!has(col, row + 1)) segments.push([x + s, y + s, x, y + s]);
+      if (!has(col - 1, row)) segments.push([x, y + s, x, y]);
+    }
+
+    return { fillD: fillD.trim(), outlineD: segmentsToClosedPath(segments) };
+  }
+
+  function segmentsToClosedPath(segments) {
+    if (!segments.length) return '';
+
+    const edgeKey = (x1, y1, x2, y2) => {
+      if (x1 < x2 || (x1 === x2 && y1 <= y2)) return `${x1},${y1}|${x2},${y2}`;
+      return `${x2},${y2}|${x1},${y1}`;
+    };
+
+    const edges = segments.map(([x1, y1, x2, y2]) => ({
+      x1,
+      y1,
+      x2,
+      y2,
+      key: edgeKey(x1, y1, x2, y2),
+    }));
+    const unused = new Set(edges.map(e => e.key));
+    const paths = [];
+
+    while (unused.size > 0) {
+      const startKey = unused.values().next().value;
+      const startEdge = edges.find(e => e.key === startKey);
+      unused.delete(startKey);
+
+      let d = `M ${startEdge.x1} ${startEdge.y1} L ${startEdge.x2} ${startEdge.y2}`;
+      let cx = startEdge.x2;
+      let cy = startEdge.y2;
+      const { x1: startX, y1: startY } = startEdge;
+      let guard = edges.length + 4;
+
+      while (guard-- > 0 && (cx !== startX || cy !== startY)) {
+        let next = null;
+        for (const e of edges) {
+          if (!unused.has(e.key)) continue;
+          if (e.x1 === cx && e.y1 === cy) {
+            next = e;
+            break;
+          }
+          if (e.x2 === cx && e.y2 === cy) {
+            next = { x1: e.x2, y1: e.y2, x2: e.x1, y2: e.y1, key: e.key };
+            break;
+          }
+        }
+        if (!next) break;
+        unused.delete(next.key);
+        cx = next.x2;
+        cy = next.y2;
+        d += ` L ${cx} ${cy}`;
+      }
+
+      if (cx === startX && cy === startY) d += ' Z';
+      paths.push(d);
+    }
+
+    return paths.join(' ');
+  }
+
+  function scheduleChartSelectionOverlaySync() {
+    if (chartSelectionOverlayRaf) return;
+    chartSelectionOverlayRaf = requestAnimationFrame(() => {
+      chartSelectionOverlayRaf = 0;
+      syncChartSelectionOverlay({ lightweight: true });
+    });
+  }
+
+  function setEyedropperActive(on) {
+    eyedropperActive = !!on;
+    document.body.classList.toggle('eyedropper-active', eyedropperActive);
+    if (previewViewport) previewViewport.classList.toggle('eyedropper-cursor', eyedropperActive);
+    if (pickerEyedropperBtn) pickerEyedropperBtn.classList.toggle('active', eyedropperActive);
+    if (eyedropperActive && pickerPopover) {
+      pickerOpen = false;
+      pickerPopover.classList.remove('open');
+      pickerPopover.setAttribute('aria-hidden', 'true');
+    }
+  }
+
+  function sampleGridColorAtCell(col, row) {
+    const idx = lastPixelData.grid[row][col];
+    const rgb = lastPixelData.colorList[idx];
+    return rgbToHex(rgb[0], rgb[1], rgb[2]);
+  }
+
+  function applyPickedColor(hex) {
+    const normalized = normalizeHex(hex);
+    if (chartFillPickerActive && hasChartCellSelection()) {
+      chartFill.hex = normalized;
+      chartFill.enabled = true;
+      syncChartFillRowUI();
+      applyChartFillToSelection({ recordUndo: true });
+    } else {
+      pushUndoHistory();
+      paletteItems[selectedColorIndex].hex = normalized;
+      if (sourceImage && lastPixelData) {
+        if (applyPaletteColorsToLastPixelData()) rerenderPreviewFromLastData();
+        else scheduleLiveRender();
+      }
+      renderPaletteEditor();
+      syncPickerFromSelectedColor();
+    }
+    openPicker();
+  }
+
+  function handleEyedropperPick(e) {
+    if (!lastPixelData) return;
+    const cell = getGridCellFromPointer(e);
+    if (!cell) return;
+    applyPickedColor(sampleGridColorAtCell(cell.col, cell.row));
+    setEyedropperActive(false);
+  }
+
+  function chartCellsInRect(c0, r0, c1, r1) {
+    const minC = Math.min(c0, c1);
+    const maxC = Math.max(c0, c1);
+    const minR = Math.min(r0, r1);
+    const maxR = Math.max(r0, r1);
+    const cells = [];
+    for (let row = minR; row <= maxR; row++) {
+      for (let col = minC; col <= maxC; col++) {
+        cells.push({ col, row });
+      }
+    }
+    return cells;
+  }
+
+  function setChartSelectionRect(c0, r0, c1, r1) {
+    chartCellSelection.clear();
+    for (const { col, row } of chartCellsInRect(c0, r0, c1, r1)) {
+      chartCellSelection.add(`${col},${row}`);
+    }
+    if (chartSelecting) scheduleChartSelectionOverlaySync();
+    else syncChartSelectionOverlay();
+  }
+
+  function addChartSelectionRect(c0, r0, c1, r1) {
+    for (const { col, row } of chartCellsInRect(c0, r0, c1, r1)) {
+      chartCellSelection.add(`${col},${row}`);
+    }
+    if (chartSelecting) scheduleChartSelectionOverlaySync();
+    else syncChartSelectionOverlay();
+  }
+
+  function applyChartSelectionFromDrag(cell) {
+    if (!chartSelectAnchor) return;
+    if (chartSelectBaseSelection) {
+      chartCellSelection.clear();
+      for (const key of chartSelectBaseSelection) chartCellSelection.add(key);
+    } else {
+      chartCellSelection.clear();
+    }
+    for (const { col, row } of chartCellsInRect(
+      chartSelectAnchor.col,
+      chartSelectAnchor.row,
+      cell.col,
+      cell.row
+    )) {
+      chartCellSelection.add(`${col},${row}`);
+    }
+    scheduleChartSelectionOverlaySync();
+  }
+
+  function syncChartSelectionOverlay({ lightweight = false } = {}) {
+    if (!chartSelectionLayer) return;
+    if (!isChartSelectToolActive() || chartCellSelection.size === 0 || !lastPixelData) {
+      chartSelectionLayer.innerHTML = '';
+      chartSelectionLayer.style.display = 'none';
+      chartSelectionLayer.setAttribute('aria-hidden', 'true');
+      updateChartFillSection();
+      return;
+    }
+    const svg = outputContainer.querySelector('svg');
+    if (!svg) {
+      chartSelectionLayer.innerHTML = '';
+      chartSelectionLayer.style.display = 'none';
+      updateChartFillSection();
+      return;
+    }
+    const { stitchSize } = lastPixelData;
+    const vb = svg.viewBox && svg.viewBox.baseVal;
+    const canvasW = vb && vb.width > 0 ? vb.width : lastPixelData.cols * stitchSize;
+    const canvasH = vb && vb.height > 0 ? vb.height : lastPixelData.rows * stitchSize;
+    const svgRect = svg.getBoundingClientRect();
+    const vpRect = previewViewport.getBoundingClientRect();
+    chartSelectionLayer.style.display = 'block';
+    chartSelectionLayer.style.left = `${svgRect.left - vpRect.left + previewViewport.scrollLeft}px`;
+    chartSelectionLayer.style.top = `${svgRect.top - vpRect.top + previewViewport.scrollTop}px`;
+    chartSelectionLayer.style.width = `${svgRect.width}px`;
+    chartSelectionLayer.style.height = `${svgRect.height}px`;
+    chartSelectionLayer.setAttribute('aria-hidden', 'false');
+
+    const { fillD, outlineD } = buildSelectionPaths(chartCellSelection, stitchSize);
+    let markup = `<svg width="100%" height="100%" viewBox="0 0 ${canvasW} ${canvasH}" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">`;
+    if (fillD) markup += `<path class="chart-sel-fill" d="${fillD}"/>`;
+    if (outlineD) {
+      markup += `<path class="chart-sel-ants-w" d="${outlineD}"/>`;
+      markup += `<path class="chart-sel-ants-b" d="${outlineD}"/>`;
+    }
+    markup += '</svg>';
+    chartSelectionLayer.innerHTML = markup;
+    if (!lightweight) updateChartFillSection();
+  }
+
+  function paintChartSelection(paletteIndex, { recordUndo = true } = {}) {
+    if (!lastPixelData || chartCellSelection.size === 0) return;
+    if (recordUndo) pushUndoHistory();
+    for (const key of chartCellSelection) {
+      const [col, row] = key.split(',').map(Number);
+      lastPixelData.grid[row][col] = paletteIndex;
+    }
+    if (applyPaletteColorsToLastPixelData()) rerenderPreviewFromLastData();
+    else scheduleLiveRender();
+  }
+
+  function hasChartCellSelection() {
+    return isChartSelectToolActive() && chartCellSelection.size > 0;
+  }
+
+  previewViewport.addEventListener('scroll', () => {
+    if (chartCellSelection.size > 0) scheduleChartSelectionOverlaySync();
+  });
+
   previewViewport.addEventListener('pointerdown', e => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 && e.button !== 1) return;
     if (e.pointerType !== 'mouse' && e.pointerType !== 'pen') return;
     if (placeholder.style.display !== 'none') return;
     if (!outputContainer.querySelector('svg')) return;
+
+    if (eyedropperActive) {
+      handleEyedropperPick(e);
+      e.preventDefault();
+      return;
+    }
+
+    const chartMode = previewMode === 'chart';
+    const panWithSpace = chartMode && chartSpaceHeld;
+    const panWithMiddle = e.button === 1;
+
+    if (chartMode && chartSelectToolEnabled && e.button === 0 && !chartSpaceHeld) {
+      const cell = getChartCellFromPointer(e);
+      if (cell) {
+        chartSelecting = true;
+        chartSelectPointerId = e.pointerId;
+        chartSelectAnchor = cell;
+        chartSelectBaseSelection = e.shiftKey ? new Set(chartCellSelection) : null;
+        if (!e.shiftKey) resetChartFill();
+        if (e.shiftKey) {
+          addChartSelectionRect(cell.col, cell.row, cell.col, cell.row);
+        } else {
+          setChartSelectionRect(cell.col, cell.row, cell.col, cell.row);
+        }
+        previewViewport.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        return;
+      }
+      if (!e.shiftKey) clearChartCellSelection();
+    }
+
     const can =
       previewViewport.scrollWidth > previewViewport.clientWidth + 2 ||
       previewViewport.scrollHeight > previewViewport.clientHeight + 2;
     if (!can) return;
+    if (chartMode && chartSelectToolEnabled && !panWithSpace && !panWithMiddle) return;
+
     previewPanning = true;
     previewPanStartX = e.clientX;
     previewPanStartY = e.clientY;
     previewPanScrollLeft = previewViewport.scrollLeft;
     previewPanScrollTop = previewViewport.scrollTop;
     previewViewport.classList.add('is-panning');
+    if (chartMode) previewViewport.classList.add('is-chart-panning');
     previewViewport.setPointerCapture(e.pointerId);
   });
 
   previewViewport.addEventListener('pointermove', e => {
+    if (chartSelecting && e.pointerId === chartSelectPointerId && chartSelectAnchor) {
+      const cell = getChartCellFromPointer(e) || chartSelectAnchor;
+      applyChartSelectionFromDrag(cell);
+      return;
+    }
     if (!previewPanning) return;
     const dx = e.clientX - previewPanStartX;
     const dy = e.clientY - previewPanStartY;
@@ -401,9 +910,22 @@ import {
   });
 
   function endPreviewPan(e) {
+    if (chartSelecting && e.pointerId === chartSelectPointerId) {
+      chartSelecting = false;
+      chartSelectPointerId = null;
+      chartSelectAnchor = null;
+      chartSelectBaseSelection = null;
+      try {
+        previewViewport.releasePointerCapture(e.pointerId);
+      } catch (_) {
+        /* ignore */
+      }
+      syncChartSelectionOverlay();
+      return;
+    }
     if (!previewPanning) return;
     previewPanning = false;
-    previewViewport.classList.remove('is-panning');
+    previewViewport.classList.remove('is-panning', 'is-chart-panning');
     try {
       previewViewport.releasePointerCapture(e.pointerId);
     } catch (_) {
@@ -432,6 +954,71 @@ import {
       if (previewMode === 'chart') return;
       pushUndoHistory();
       setPreviewMode('chart');
+    });
+  }
+
+  if (chartSelectToolBtn) {
+    chartSelectToolBtn.addEventListener('click', () => {
+      if (previewMode !== 'chart' || !sourceImage) return;
+      setChartSelectToolEnabled(!chartSelectToolEnabled);
+    });
+  }
+
+  if (chartFillRow) {
+    chartFillRow.addEventListener('click', e => {
+      if (e.target.closest('button, input')) return;
+      if (!hasChartCellSelection()) return;
+      openChartFillPicker();
+    });
+  }
+  if (chartFillHexInput) {
+    chartFillHexInput.addEventListener('click', e => e.stopPropagation());
+    chartFillHexInput.addEventListener('input', e => {
+      e.stopPropagation();
+      const val = chartFillHexInput.value.trim();
+      if (!/^#?[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(val)) return;
+      pushUndoHistory();
+      chartFill.hex = normalizeHex(val);
+      chartFill.enabled = true;
+      syncChartFillRowUI();
+      applyChartFillToSelection({ recordUndo: false });
+    });
+    chartFillHexInput.addEventListener('blur', () => {
+      const hex = chartFill.enabled ? chartFill.hex : '#ffffff';
+      chartFillHexInput.value = normalizeHex(hex).toUpperCase();
+    });
+  }
+  if (chartFillEyeBtn) {
+    chartFillEyeBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      pushUndoHistory();
+      chartFill.enabled = !chartFill.enabled;
+      syncChartFillRowUI();
+      applyChartFillToSelection({ recordUndo: false });
+    });
+  }
+  if (chartFillAddBtn) {
+    chartFillAddBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      const hex = normalizeHex(chartFill.enabled ? chartFill.hex : '#ffffff');
+      pushUndoHistory();
+      let idx = paletteItems.findIndex(p => normalizeHex(p.hex) === hex);
+      if (idx < 0) {
+        if (paletteItems.length >= MAX_PALETTE_COLORS) return;
+        paletteItems.push({
+          hex,
+          enabled: true,
+          opacity: chartFill.opacity ?? 100,
+        });
+        idx = paletteItems.length - 1;
+        colorCountInput.value = String(paletteItems.length);
+        colorCountNumberInput.value = String(paletteItems.length);
+      }
+      selectedColorIndex = idx;
+      chartFillPickerActive = false;
+      applyChartFillToSelection({ recordUndo: false });
+      renderPaletteEditor();
+      setPaletteToolbarState();
     });
   }
 
@@ -648,6 +1235,7 @@ import {
     downloadBtn.disabled = true;
     clearImageBtn.disabled = true;
     hiddenInput.value = '';
+    setChartSelectToolEnabled(false);
     previewZoom = 1;
     previewViewport.scrollLeft = 0;
     previewViewport.scrollTop = 0;
@@ -720,6 +1308,8 @@ import {
     }
     applyPreviewSizing();
     updatePreviewPanState();
+    requestAnimationFrame(() => syncChartSelectionOverlay());
+    updateChartSelectToolUI();
   }
 
   function rerenderPreviewFromLastData() {
@@ -974,7 +1564,10 @@ import {
     previewMode = mode;
     if (previewKnitBtn) previewKnitBtn.classList.toggle('active', mode === 'swatch');
     if (previewChartBtn) previewChartBtn.classList.toggle('active', mode === 'chart');
+    if (mode !== 'chart') setChartSelectToolEnabled(false);
+    else updateChartSelectToolUI();
     updateOptionVisibility();
+    updatePreviewPanState();
     scheduleLiveRender();
   }
 
@@ -1016,7 +1609,10 @@ import {
 
     if (document.activeElement !== zoomInput) formatZoomField();
     setZoomControlsDisabled(false);
-    requestAnimationFrame(() => updatePreviewPanState());
+    requestAnimationFrame(() => {
+      updatePreviewPanState();
+      syncChartSelectionOverlay();
+    });
   }
 
   function renderPaletteEditor() {
@@ -1040,6 +1636,7 @@ import {
       if (!item.enabled) row.classList.add('disabled');
       row.addEventListener('click', () => {
         selectedColorIndex = idx;
+        chartFillPickerActive = false;
         openPicker();
         renderPaletteEditor();
       });
@@ -1224,8 +1821,24 @@ import {
   function updateColorFromPicker() {
     if (!paletteItems.length) return;
     const hue = parseInt(hueSlider.value, 10);
-    paletteItems[selectedColorIndex].hex = normalizeHex(hsvToHex(hue, pickerSat, pickerVal));
-    paletteItems[selectedColorIndex].opacity = clampInt(opacitySlider.value, 0, 100, 100);
+    const hex = normalizeHex(hsvToHex(hue, pickerSat, pickerVal));
+    const opacity = clampInt(opacitySlider.value, 0, 100, 100);
+
+    if (chartFillPickerActive && hasChartCellSelection()) {
+      chartFill.hex = hex;
+      chartFill.opacity = opacity;
+      chartFill.enabled = true;
+      syncChartFillRowUI();
+      if (sourceImage && lastPixelData) {
+        applyChartFillToSelection({ recordUndo: !chartPickerPaintUndoPushed });
+        if (!chartPickerPaintUndoPushed) chartPickerPaintUndoPushed = true;
+      }
+      return;
+    }
+
+    chartFillPickerActive = false;
+    paletteItems[selectedColorIndex].hex = hex;
+    paletteItems[selectedColorIndex].opacity = opacity;
     if (sourceImage && lastPixelData) {
       if (applyPaletteColorsToLastPixelData()) rerenderPreviewFromLastData();
       else scheduleLiveRender();
@@ -1289,6 +1902,7 @@ import {
     pickerOpen = false;
     pickerPopover.classList.remove('open');
     pickerPopover.setAttribute('aria-hidden', 'true');
+    setEyedropperActive(false);
   }
 
   function togglePicker() {
@@ -1298,6 +1912,7 @@ import {
 
   syncPlaneColor();
   updateOptionVisibility();
+  updateChartSelectToolUI();
   renderPaletteEditor();
   setZoomControlsDisabled(true);
 
