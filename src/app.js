@@ -31,6 +31,7 @@ import {
   let previewMode = 'swatch';
   /** User zoom multiplier on top of fit-to-viewport (1 = fitted). */
   let previewZoom = 1;
+  const MAX_PALETTE_COLORS = 10;
   let resetPreviewScrollNext = false;
 
   /** @type {Array<ReturnType<typeof captureEditorState>>} */
@@ -44,24 +45,20 @@ import {
   const outputContainer = document.getElementById('outputContainer');
   const placeholder = document.getElementById('placeholder');
   const downloadBtn = document.getElementById('downloadBtn');
-  const previewSwatchBtn = document.getElementById('previewSwatchBtn');
+  const previewKnitBtn = document.getElementById('previewKnitBtn');
   const previewChartBtn = document.getElementById('previewChartBtn');
-  const statusBar = document.getElementById('statusBar');
   const processingOverlay = document.getElementById('processingOverlay');
   const processingMsg = document.getElementById('processingMsg');
   const canvasArea = document.getElementById('canvasArea');
   const hiddenInput = document.getElementById('hiddenInput');
   const stitchSizeInput = document.getElementById('stitchSize');
   const stitchSizeNumberInput = document.getElementById('stitchSizeInput');
-  const stitchSizeVal = document.getElementById('stitchSizeVal');
   const colorCountInput = document.getElementById('colorCount');
   const colorCountNumberInput = document.getElementById('colorCountInput');
-  const colorCountVal = document.getElementById('colorCountVal');
   const gridToggle = document.getElementById('gridToggle');
   const textureToggle = document.getElementById('textureToggle');
   const paletteEditor = document.getElementById('paletteEditor');
   const addColorBtn = document.getElementById('addColorBtn');
-  const pickerTrigger = document.getElementById('pickerTrigger');
   const pickerPopover = document.getElementById('pickerPopover');
   const pickerCloseBtn = document.getElementById('pickerCloseBtn');
   const svPlane = document.getElementById('svPlane');
@@ -75,30 +72,20 @@ import {
   const zoomOutBtn = document.getElementById('zoomOutBtn');
   const zoomInput = document.getElementById('zoomInput');
   const clearImageBtn = document.getElementById('clearImageBtn');
-  const selectToolBtn = document.getElementById('selectToolBtn');
-  const copySelectionBtn = document.getElementById('copySelectionBtn');
-  const pasteSelectionBtn = document.getElementById('pasteSelectionBtn');
-  const downloadFormatSelect = document.getElementById('downloadFormat');
+  const exportModal = document.getElementById('exportModal');
+  const exportModalClose = document.getElementById('exportModalClose');
+  const exportWidthInput = document.getElementById('exportWidth');
+  const exportHeightInput = document.getElementById('exportHeight');
+  const exportScaleSelect = document.getElementById('exportScale');
+  const exportFormatSelect = document.getElementById('exportFormat');
+  const exportConfirmBtn = document.getElementById('exportConfirmBtn');
+  let exportAspect = 1;
+  let syncingExportSize = false;
   const textureRow = document.getElementById('textureRow');
   const gridRow = document.getElementById('gridRow');
   const undoBtn = document.getElementById('undoBtn');
   const redoBtn = document.getElementById('redoBtn');
-  const selectionOverlay = document.createElement('div');
-  selectionOverlay.className = 'selection-overlay';
-  previewViewport.appendChild(selectionOverlay);
-
-  let selectToolEnabled = false;
-  let selecting = false;
-  let selectionRect = null;
-  let copiedPatch = null;
-  let selectionStartCell = null;
-
-  function pulseStatus(message) {
-    statusBar.textContent = message;
-    statusBar.classList.remove('status-bar--live');
-    void statusBar.offsetWidth;
-    statusBar.classList.add('status-bar--live');
-  }
+  function pulseStatus() {}
 
   function setupInteractiveFeedback() {
     document.querySelectorAll('button').forEach(btn => {
@@ -110,94 +97,12 @@ import {
     });
   }
 
-  function setCollageControlsState(hasImage) {
-    selectToolBtn.disabled = !hasImage;
-    copySelectionBtn.disabled = !hasImage || !selectionRect;
-    pasteSelectionBtn.disabled = !hasImage || !copiedPatch;
-  }
-
-  function clearSelection() {
-    selectionRect = null;
-    selecting = false;
-    selectionStartCell = null;
-    selectionOverlay.style.display = 'none';
-    copySelectionBtn.disabled = true;
-  }
-
-  function getSvgCellFromPointer(event) {
-    if (!lastPixelData) return null;
-    const svg = outputContainer.querySelector('svg');
-    if (!svg) return null;
-    const rect = svg.getBoundingClientRect();
-    if (!rect.width || !rect.height) return null;
-    const nx = (event.clientX - rect.left) / rect.width;
-    const ny = (event.clientY - rect.top) / rect.height;
-    if (nx < 0 || nx > 1 || ny < 0 || ny > 1) return null;
-    const x = Math.max(0, Math.min(lastPixelData.cols - 1, Math.floor(nx * lastPixelData.cols)));
-    const y = Math.max(0, Math.min(lastPixelData.rows - 1, Math.floor(ny * lastPixelData.rows)));
-    return { x, y, rect };
-  }
-
-  function updateSelectionOverlay() {
-    if (!selectionRect || !lastPixelData) {
-      selectionOverlay.style.display = 'none';
-      return;
+  function setPaletteToolbarState() {
+    if (addColorBtn) {
+      addColorBtn.disabled =
+        paletteItems.length === 0 || paletteItems.length >= MAX_PALETTE_COLORS;
     }
-    const svg = outputContainer.querySelector('svg');
-    if (!svg) {
-      selectionOverlay.style.display = 'none';
-      return;
-    }
-    const svgRect = svg.getBoundingClientRect();
-    const vpRect = previewViewport.getBoundingClientRect();
-    const cellW = svgRect.width / lastPixelData.cols;
-    const cellH = svgRect.height / lastPixelData.rows;
-    selectionOverlay.style.left = `${(svgRect.left - vpRect.left) + selectionRect.x * cellW + previewViewport.scrollLeft}px`;
-    selectionOverlay.style.top = `${(svgRect.top - vpRect.top) + selectionRect.y * cellH + previewViewport.scrollTop}px`;
-    selectionOverlay.style.width = `${Math.max(1, selectionRect.w * cellW)}px`;
-    selectionOverlay.style.height = `${Math.max(1, selectionRect.h * cellH)}px`;
-    selectionOverlay.style.display = 'block';
   }
-
-  function toggleSelectTool() {
-    selectToolEnabled = !selectToolEnabled;
-    selectToolBtn.classList.toggle('active', selectToolEnabled);
-    if (!selectToolEnabled) clearSelection();
-  }
-
-  function copySelectionPatch() {
-    if (!lastPixelData || !selectionRect) return;
-    const patch = [];
-    for (let y = 0; y < selectionRect.h; y++) {
-      const row = [];
-      for (let x = 0; x < selectionRect.w; x++) {
-        row.push(lastPixelData.grid[selectionRect.y + y][selectionRect.x + x]);
-      }
-      patch.push(row);
-    }
-    copiedPatch = patch;
-    pasteSelectionBtn.disabled = false;
-    pulseStatus(`Copied ${selectionRect.w}×${selectionRect.h} stitches`);
-  }
-
-  function pasteSelectionPatch() {
-    if (!lastPixelData || !copiedPatch) return;
-    pushUndoHistory();
-    const startX = selectionRect ? selectionRect.x : Math.max(0, Math.floor((lastPixelData.cols - copiedPatch[0].length) / 2));
-    const startY = selectionRect ? selectionRect.y : Math.max(0, Math.floor((lastPixelData.rows - copiedPatch.length) / 2));
-    for (let y = 0; y < copiedPatch.length; y++) {
-      for (let x = 0; x < copiedPatch[y].length; x++) {
-        const tx = startX + x;
-        const ty = startY + y;
-        if (tx >= 0 && tx < lastPixelData.cols && ty >= 0 && ty < lastPixelData.rows) {
-          lastPixelData.grid[ty][tx] = copiedPatch[y][x];
-        }
-      }
-    }
-    rerenderPreviewFromLastData();
-    pulseStatus(`Pasted ${copiedPatch[0].length}×${copiedPatch.length} stitches`);
-  }
-
 
   function clonePixelData(pd) {
     return {
@@ -230,17 +135,11 @@ import {
     selectedColorIndex = s.selectedColorIndex;
     colorCountInput.value = s.colorCount;
     colorCountNumberInput.value = s.colorCount;
-    colorCountVal.textContent = s.colorCount;
     stitchSizeInput.value = s.stitchSize;
     stitchSizeNumberInput.value = s.stitchSize;
-    stitchSizeVal.textContent = `${s.stitchSize}px`;
-    currentStitch = s.currentStitch;
-    document.querySelectorAll('.stitch-btn').forEach(b => {
-      b.classList.toggle('active', b.dataset.stitch === currentStitch);
-    });
     previewMode = s.previewMode;
-    previewSwatchBtn.classList.toggle('active', previewMode === 'swatch');
-    previewChartBtn.classList.toggle('active', previewMode === 'chart');
+    if (previewKnitBtn) previewKnitBtn.classList.toggle('active', previewMode === 'swatch');
+    if (previewChartBtn) previewChartBtn.classList.toggle('active', previewMode === 'chart');
     previewZoom = s.previewZoom;
     gridToggle.classList.toggle('on', s.gridOn);
     textureToggle.classList.toggle('on', s.textureOn);
@@ -298,7 +197,6 @@ import {
     const next = clampInt(stitchSizeInput.value, 1, 8, 4);
     stitchSizeInput.value = String(next);
     stitchSizeNumberInput.value = String(next);
-    stitchSizeVal.textContent = `${next}px`;
     scheduleLiveRender();
   });
 
@@ -309,7 +207,6 @@ import {
     const next = clampInt(stitchSizeNumberInput.value, 1, 8, 4);
     stitchSizeInput.value = String(next);
     stitchSizeNumberInput.value = String(next);
-    stitchSizeVal.textContent = `${next}px`;
     scheduleLiveRender();
   });
 
@@ -318,17 +215,15 @@ import {
   });
   colorCountInput.addEventListener('input', () => {
     colorCountNumberInput.value = colorCountInput.value;
-    colorCountVal.textContent = colorCountInput.value;
   });
 
   colorCountNumberInput.addEventListener('pointerdown', () => {
     if (sourceImage && lastPixelData) pushUndoHistory();
   });
   colorCountNumberInput.addEventListener('input', () => {
-    const next = clampInt(colorCountNumberInput.value, 1, 16, 1);
+    const next = clampInt(colorCountNumberInput.value, 1, MAX_PALETTE_COLORS, 1);
     colorCountInput.value = String(next);
     colorCountNumberInput.value = String(next);
-    colorCountVal.textContent = String(next);
   });
 
   colorCountInput.addEventListener('change', () => {
@@ -345,19 +240,8 @@ import {
     scheduleLiveRender();
   });
 
-  /* ─── Stitch style buttons ───────────────────────────────── */
-  document.querySelectorAll('.stitch-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      if (btn.dataset.stitch === currentStitch) return;
-      pushUndoHistory();
-      document.querySelectorAll('.stitch-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      currentStitch = btn.dataset.stitch;
-      scheduleLiveRender();
-    });
-  });
-
   addColorBtn.addEventListener('click', () => {
+    if (paletteItems.length >= MAX_PALETTE_COLORS) return;
     pushUndoHistory();
     const base =
       paletteItems[selectedColorIndex]?.hex ||
@@ -366,16 +250,12 @@ import {
     const [r, g, b] = hexToRgb(base);
     const [h, s, l] = rgbToHsl(r, g, b);
     const next = normalizeHex(hslToHex((h + 24) % 360, s, l));
-    paletteItems.push({ hex: next, enabled: true });
+    paletteItems.push({ hex: next, enabled: true, opacity: 100 });
     selectedColorIndex = paletteItems.length - 1;
     renderPaletteEditor();
     scheduleLiveRender();
   });
 
-  pickerTrigger.addEventListener('click', e => {
-    e.stopPropagation();
-    togglePicker();
-  });
   if (pickerCloseBtn) {
     pickerCloseBtn.addEventListener('click', e => {
       e.stopPropagation();
@@ -389,7 +269,7 @@ import {
 
   document.addEventListener('pointerdown', e => {
     if (!pickerOpen) return;
-    if (pickerPopover.contains(e.target) || pickerTrigger.contains(e.target)) return;
+    if (pickerPopover.contains(e.target)) return;
     closePicker();
   });
 
@@ -477,10 +357,6 @@ import {
     e.stopPropagation();
     clearImage();
   });
-  selectToolBtn.addEventListener('click', toggleSelectTool);
-  copySelectionBtn.addEventListener('click', copySelectionPatch);
-  pasteSelectionBtn.addEventListener('click', pasteSelectionPatch);
-
   let previewPanning = false;
   let previewPanStartX = 0;
   let previewPanStartY = 0;
@@ -503,17 +379,6 @@ import {
     if (e.pointerType !== 'mouse' && e.pointerType !== 'pen') return;
     if (placeholder.style.display !== 'none') return;
     if (!outputContainer.querySelector('svg')) return;
-    if (selectToolEnabled) {
-      const cell = getSvgCellFromPointer(e);
-      if (!cell) return;
-      selecting = true;
-      selectionStartCell = { x: cell.x, y: cell.y };
-      selectionRect = { x: cell.x, y: cell.y, w: 1, h: 1 };
-      copySelectionBtn.disabled = true;
-      previewViewport.setPointerCapture(e.pointerId);
-      updateSelectionOverlay();
-      return;
-    }
     const can =
       previewViewport.scrollWidth > previewViewport.clientWidth + 2 ||
       previewViewport.scrollHeight > previewViewport.clientHeight + 2;
@@ -528,17 +393,6 @@ import {
   });
 
   previewViewport.addEventListener('pointermove', e => {
-    if (selecting && selectionStartCell) {
-      const cell = getSvgCellFromPointer(e);
-      if (!cell) return;
-      const minX = Math.min(selectionStartCell.x, cell.x);
-      const minY = Math.min(selectionStartCell.y, cell.y);
-      const maxX = Math.max(selectionStartCell.x, cell.x);
-      const maxY = Math.max(selectionStartCell.y, cell.y);
-      selectionRect = { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
-      updateSelectionOverlay();
-      return;
-    }
     if (!previewPanning) return;
     const dx = e.clientX - previewPanStartX;
     const dy = e.clientY - previewPanStartY;
@@ -547,18 +401,6 @@ import {
   });
 
   function endPreviewPan(e) {
-    if (selecting) {
-      selecting = false;
-      selectionStartCell = null;
-      copySelectionBtn.disabled = !selectionRect;
-      updateSelectionOverlay();
-      try {
-        previewViewport.releasePointerCapture(e.pointerId);
-      } catch (_) {
-        /* ignore */
-      }
-      return;
-    }
     if (!previewPanning) return;
     previewPanning = false;
     previewViewport.classList.remove('is-panning');
@@ -571,28 +413,27 @@ import {
 
   previewViewport.addEventListener('pointerup', endPreviewPan);
   previewViewport.addEventListener('pointercancel', endPreviewPan);
-  previewViewport.addEventListener('scroll', () => {
-    if (selectionRect) updateSelectionOverlay();
-  });
-
   window.addEventListener('resize', () => {
     if (outputContainer.querySelector('svg')) {
       applyPreviewSizing();
       updatePreviewPanState();
-      updateSelectionOverlay();
     }
   });
 
-  previewSwatchBtn.addEventListener('click', () => {
-    if (previewMode === 'swatch') return;
-    pushUndoHistory();
-    setPreviewMode('swatch');
-  });
-  previewChartBtn.addEventListener('click', () => {
-    if (previewMode === 'chart') return;
-    pushUndoHistory();
-    setPreviewMode('chart');
-  });
+  if (previewKnitBtn) {
+    previewKnitBtn.addEventListener('click', () => {
+      if (previewMode === 'swatch') return;
+      pushUndoHistory();
+      setPreviewMode('swatch');
+    });
+  }
+  if (previewChartBtn) {
+    previewChartBtn.addEventListener('click', () => {
+      if (previewMode === 'chart') return;
+      pushUndoHistory();
+      setPreviewMode('chart');
+    });
+  }
 
   undoBtn.addEventListener('click', () => undo());
   redoBtn.addEventListener('click', () => redo());
@@ -605,7 +446,40 @@ import {
     else undo();
   });
 
-  downloadBtn.addEventListener('click', downloadActive);
+  downloadBtn.addEventListener('click', openExportModal);
+
+  if (exportModalClose) exportModalClose.addEventListener('click', closeExportModal);
+  if (exportConfirmBtn) exportConfirmBtn.addEventListener('click', () => {
+    closeExportModal();
+    downloadActive();
+  });
+  if (exportModal) {
+    exportModal.addEventListener('click', e => {
+      if (e.target === exportModal) closeExportModal();
+    });
+  }
+  if (exportWidthInput && exportHeightInput) {
+    exportWidthInput.addEventListener('input', () => {
+      if (syncingExportSize) return;
+      syncingExportSize = true;
+      const w = clampInt(exportWidthInput.value, 1, 8192, 300);
+      exportWidthInput.value = String(w);
+      exportHeightInput.value = String(Math.max(1, Math.round(w / exportAspect)));
+      syncingExportSize = false;
+    });
+    exportHeightInput.addEventListener('input', () => {
+      if (syncingExportSize) return;
+      syncingExportSize = true;
+      const h = clampInt(exportHeightInput.value, 1, 8192, 300);
+      exportHeightInput.value = String(h);
+      exportWidthInput.value = String(Math.max(1, Math.round(h * exportAspect)));
+      syncingExportSize = false;
+    });
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && exportModal?.classList.contains('open')) closeExportModal();
+  });
 
   /* ─── File drop & browse ─────────────────────────────────── */
   placeholder.addEventListener('click', e => {
@@ -772,11 +646,7 @@ import {
     outputContainer.style.display = 'none';
     placeholder.style.display = 'flex';
     downloadBtn.disabled = true;
-    downloadFormatSelect.disabled = true;
     clearImageBtn.disabled = true;
-    selectToolBtn.disabled = true;
-    copySelectionBtn.disabled = true;
-    pasteSelectionBtn.disabled = true;
     hiddenInput.value = '';
     previewZoom = 1;
     previewViewport.scrollLeft = 0;
@@ -786,13 +656,8 @@ import {
     selectedColorIndex = 0;
     colorCountInput.value = '1';
     colorCountNumberInput.value = '1';
-    colorCountVal.textContent = '1';
     renderPaletteEditor();
-    pulseStatus('awaiting image');
-    copiedPatch = null;
-    selectToolEnabled = false;
-    selectToolBtn.classList.remove('active');
-    clearSelection();
+    setPaletteToolbarState();
     resetHistoryStacks();
   }
 
@@ -805,18 +670,16 @@ import {
         previewZoom = 1;
         resetPreviewScrollNext = true;
         clearImageBtn.disabled = false;
-        setCollageControlsState(true);
         stitchSizeInput.value = '4';
         stitchSizeNumberInput.value = '4';
-        stitchSizeVal.textContent = '4px';
-        colorCountInput.value = '16';
-        colorCountNumberInput.value = '16';
-        colorCountVal.textContent = '16';
+        colorCountInput.value = String(MAX_PALETTE_COLORS);
+        colorCountNumberInput.value = String(MAX_PALETTE_COLORS);
         gridToggle.classList.add('on');
         pulseStatus(`${img.width} × ${img.height}px — ready`);
         paletteItems = extractPaletteFromImage(parseInt(colorCountInput.value, 10));
         selectedColorIndex = 0;
         renderPaletteEditor();
+        setPaletteToolbarState();
         resetHistoryStacks();
         renderActive();
       };
@@ -850,9 +713,6 @@ import {
 
     placeholder.style.display = 'none';
     downloadBtn.disabled = false;
-    downloadFormatSelect.disabled = false;
-    setCollageControlsState(true);
-
     if (resetPreviewScrollNext) {
       previewViewport.scrollLeft = 0;
       previewViewport.scrollTop = 0;
@@ -860,12 +720,6 @@ import {
     }
     applyPreviewSizing();
     updatePreviewPanState();
-    updateSelectionOverlay();
-
-    const { cols, rows } = lastPixelData;
-    const enabledCount = paletteItems.filter(p => p.enabled).length;
-    const prevLabel = previewMode === 'chart' ? 'chart' : 'swatch';
-    pulseStatus(`${cols} × ${rows} stitches — ${prevLabel} — ${enabledCount}/${paletteItems.length} colors`);
   }
 
   function rerenderPreviewFromLastData() {
@@ -909,6 +763,73 @@ import {
     liveRenderTimer = setTimeout(() => renderActive(false), 70);
   }
 
+  function getSvgNaturalSize(svgEl) {
+    const wAttr = svgEl.getAttribute('width');
+    const hAttr = svgEl.getAttribute('height');
+    const vb = svgEl.viewBox && svgEl.viewBox.baseVal;
+    let w = wAttr ? parseFloat(wAttr) : NaN;
+    let h = hAttr ? parseFloat(hAttr) : NaN;
+    if (!Number.isFinite(w) || w <= 0) {
+      if (vb && vb.width > 0) w = vb.width;
+      else if (lastPixelData) w = lastPixelData.cols * lastPixelData.stitchSize;
+      else w = 300;
+    }
+    if (!Number.isFinite(h) || h <= 0) {
+      if (vb && vb.height > 0) h = vb.height;
+      else if (lastPixelData) h = lastPixelData.rows * lastPixelData.stitchSize;
+      else h = 300;
+    }
+    return {
+      w: Math.min(8192, Math.max(1, Math.round(w))),
+      h: Math.min(8192, Math.max(1, Math.round(h))),
+    };
+  }
+
+  function cloneSvgForExport(svgEl, w, h) {
+    const clone = svgEl.cloneNode(true);
+    const vb = svgEl.viewBox && svgEl.viewBox.baseVal;
+    if (vb && vb.width > 0 && vb.height > 0) {
+      clone.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.width} ${vb.height}`);
+    }
+    clone.setAttribute('width', String(w));
+    clone.setAttribute('height', String(h));
+    return clone;
+  }
+
+  function getExportPixelSize() {
+    const scale = parseFloat(exportScaleSelect?.value) || 1;
+    const baseW = clampInt(exportWidthInput?.value, 1, 8192, 300);
+    const baseH = clampInt(exportHeightInput?.value, 1, 8192, 300);
+    return {
+      w: Math.min(8192, Math.max(1, Math.round(baseW * scale))),
+      h: Math.min(8192, Math.max(1, Math.round(baseH * scale))),
+    };
+  }
+
+  function openExportModal() {
+    if (!lastPixelData) return;
+    const svgEl = outputContainer.querySelector('svg');
+    if (!svgEl) return;
+    const { w, h } = getSvgNaturalSize(svgEl);
+    exportAspect = w / h;
+    if (exportWidthInput) exportWidthInput.value = String(w);
+    if (exportHeightInput) exportHeightInput.value = String(h);
+    if (exportScaleSelect) exportScaleSelect.value = '1';
+    if (exportFormatSelect) exportFormatSelect.value = 'jpeg';
+    if (exportModal) {
+      exportModal.hidden = false;
+      exportModal.setAttribute('aria-hidden', 'false');
+      exportModal.classList.add('open');
+    }
+  }
+
+  function closeExportModal() {
+    if (!exportModal) return;
+    exportModal.classList.remove('open');
+    exportModal.hidden = true;
+    exportModal.setAttribute('aria-hidden', 'true');
+  }
+
   function serializeSvgString(svgEl) {
     const serialize = new XMLSerializer();
     let xml = serialize.serializeToString(svgEl);
@@ -927,27 +848,13 @@ import {
     setTimeout(() => URL.revokeObjectURL(url), 100);
   }
 
-  function downloadSvgAsJpeg(svgEl) {
+  function downloadSvgAsJpeg(svgEl, exportW, exportH) {
     return new Promise((resolve, reject) => {
-      const wAttr = svgEl.getAttribute('width');
-      const hAttr = svgEl.getAttribute('height');
-      const vb = svgEl.viewBox && svgEl.viewBox.baseVal;
-      let w = wAttr ? parseFloat(wAttr) : NaN;
-      let h = hAttr ? parseFloat(hAttr) : NaN;
-      if (!Number.isFinite(w) || w <= 0) {
-        if (vb && vb.width > 0) w = vb.width;
-        else if (lastPixelData) w = lastPixelData.cols * lastPixelData.stitchSize;
-        else w = 300;
-      }
-      if (!Number.isFinite(h) || h <= 0) {
-        if (vb && vb.height > 0) h = vb.height;
-        else if (lastPixelData) h = lastPixelData.rows * lastPixelData.stitchSize;
-        else h = 300;
-      }
-      w = Math.min(8192, Math.max(1, Math.round(w)));
-      h = Math.min(8192, Math.max(1, Math.round(h)));
-
-      const xml = serializeSvgString(svgEl);
+      const natural = getSvgNaturalSize(svgEl);
+      const w = exportW ?? natural.w;
+      const h = exportH ?? natural.h;
+      const exportSvg = cloneSvgForExport(svgEl, w, h);
+      const xml = serializeSvgString(exportSvg);
       const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const img = new Image();
@@ -983,27 +890,13 @@ import {
     });
   }
 
-  function downloadSvgAsPng(svgEl) {
+  function downloadSvgAsPng(svgEl, exportW, exportH) {
     return new Promise((resolve, reject) => {
-      const wAttr = svgEl.getAttribute('width');
-      const hAttr = svgEl.getAttribute('height');
-      const vb = svgEl.viewBox && svgEl.viewBox.baseVal;
-      let w = wAttr ? parseFloat(wAttr) : NaN;
-      let h = hAttr ? parseFloat(hAttr) : NaN;
-      if (!Number.isFinite(w) || w <= 0) {
-        if (vb && vb.width > 0) w = vb.width;
-        else if (lastPixelData) w = lastPixelData.cols * lastPixelData.stitchSize;
-        else w = 300;
-      }
-      if (!Number.isFinite(h) || h <= 0) {
-        if (vb && vb.height > 0) h = vb.height;
-        else if (lastPixelData) h = lastPixelData.rows * lastPixelData.stitchSize;
-        else h = 300;
-      }
-      w = Math.min(8192, Math.max(1, Math.round(w)));
-      h = Math.min(8192, Math.max(1, Math.round(h)));
-
-      const xml = serializeSvgString(svgEl);
+      const natural = getSvgNaturalSize(svgEl);
+      const w = exportW ?? natural.w;
+      const h = exportH ?? natural.h;
+      const exportSvg = cloneSvgForExport(svgEl, w, h);
+      const xml = serializeSvgString(exportSvg);
       const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const img = new Image();
@@ -1044,20 +937,22 @@ import {
     if (!svgEl) return;
 
     const tag = previewMode === 'chart' ? 'chart' : 'swatch';
-    const format = downloadFormatSelect ? downloadFormatSelect.value : 'jpeg';
+    const format = exportFormatSelect ? exportFormatSelect.value : 'jpeg';
+    const { w, h } = getExportPixelSize();
+    const exportSvg = cloneSvgForExport(svgEl, w, h);
 
     if (format === 'svg') {
-      const xml = serializeSvgString(svgEl);
+      const xml = serializeSvgString(exportSvg);
       const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
       triggerDownloadBlob(blob, `knit-artwork-${tag}.svg`);
       return;
     }
 
     if (format === 'png') {
-      downloadSvgAsPng(svgEl).then(
+      downloadSvgAsPng(svgEl, w, h).then(
         blob => triggerDownloadBlob(blob, `knit-artwork-${tag}.png`),
         () => {
-          const xml = serializeSvgString(svgEl);
+          const xml = serializeSvgString(exportSvg);
           const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
           triggerDownloadBlob(blob, `knit-artwork-${tag}.svg`);
         }
@@ -1065,10 +960,10 @@ import {
       return;
     }
 
-    downloadSvgAsJpeg(svgEl).then(
+    downloadSvgAsJpeg(svgEl, w, h).then(
       blob => triggerDownloadBlob(blob, `knit-artwork-${tag}.jpg`),
       () => {
-        const xml = serializeSvgString(svgEl);
+        const xml = serializeSvgString(exportSvg);
         const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
         triggerDownloadBlob(blob, `knit-artwork-${tag}.svg`);
       }
@@ -1077,8 +972,8 @@ import {
 
   function setPreviewMode(mode) {
     previewMode = mode;
-    previewSwatchBtn.classList.toggle('active', mode === 'swatch');
-    previewChartBtn.classList.toggle('active', mode === 'chart');
+    if (previewKnitBtn) previewKnitBtn.classList.toggle('active', mode === 'swatch');
+    if (previewChartBtn) previewChartBtn.classList.toggle('active', mode === 'chart');
     updateOptionVisibility();
     scheduleLiveRender();
   }
@@ -1100,7 +995,6 @@ import {
     const svg = outputContainer.querySelector('svg');
     if (!svg || !previewViewport) {
       setZoomControlsDisabled(true);
-      selectionOverlay.style.display = 'none';
       return;
     }
 
@@ -1122,10 +1016,7 @@ import {
 
     if (document.activeElement !== zoomInput) formatZoomField();
     setZoomControlsDisabled(false);
-    requestAnimationFrame(() => {
-      updatePreviewPanState();
-      updateSelectionOverlay();
-    });
+    requestAnimationFrame(() => updatePreviewPanState());
   }
 
   function renderPaletteEditor() {
@@ -1186,10 +1077,6 @@ import {
 
       hexWrap.appendChild(hexInput);
 
-      const strength = document.createElement('div');
-      strength.className = 'palette-strength';
-      strength.textContent = `${Math.max(0, Math.min(100, item.opacity ?? 100))} %`;
-
       const eyeBtn = document.createElement('button');
       eyeBtn.className = `eye-btn ${item.enabled ? '' : 'off'}`.trim();
       eyeBtn.title = item.enabled ? 'Hide color' : 'Show color';
@@ -1225,21 +1112,49 @@ import {
         scheduleLiveRender();
       });
 
+      const insertBtn = document.createElement('button');
+      insertBtn.type = 'button';
+      insertBtn.className = 'palette-row-add';
+      insertBtn.setAttribute('aria-label', 'Add color after');
+      insertBtn.title = 'Add color after';
+      insertBtn.innerHTML =
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>';
+      insertBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        if (paletteItems.length >= MAX_PALETTE_COLORS) return;
+        pushUndoHistory();
+        const base = paletteItems[idx].hex;
+        paletteItems.splice(idx + 1, 0, {
+          hex: base,
+          enabled: true,
+          opacity: paletteItems[idx].opacity ?? 100,
+        });
+        selectedColorIndex = idx + 1;
+        renderPaletteEditor();
+        scheduleLiveRender();
+      });
+
       const actionGroup = document.createElement('div');
       actionGroup.className = 'row-actions';
       actionGroup.appendChild(eyeBtn);
       actionGroup.appendChild(removeBtn);
 
+      const trailing = document.createElement('div');
+      trailing.className = 'palette-row-trailing';
+      trailing.appendChild(insertBtn);
+      trailing.appendChild(actionGroup);
+
       row.appendChild(chip);
       row.appendChild(hexWrap);
-      row.appendChild(strength);
-      row.appendChild(actionGroup);
+      row.appendChild(trailing);
       paletteEditor.appendChild(row);
     });
+
+    setPaletteToolbarState();
   }
 
   function extractPaletteFromImage(count) {
-    const safeCount = Math.max(1, Math.min(16, count | 0));
+    const safeCount = Math.max(1, Math.min(MAX_PALETTE_COLORS, count | 0));
     const sample = document.createElement('canvas');
     sample.width = 120;
     sample.height = Math.max(1, Math.round(120 * sourceImage.height / sourceImage.width));
@@ -1275,8 +1190,6 @@ import {
     updateOpacitySliderTrack();
     updateSVHandle();
 
-    pickerTrigger.style.background = selected.hex;
-    pickerTrigger.style.borderColor = 'rgba(0,0,0,0.12)';
   }
 
   function syncPlaneColor() {
@@ -1392,17 +1305,14 @@ import {
     const ss = clampInt(stitchSizeInput.value, 1, 8, 4);
     stitchSizeInput.value = String(ss);
     stitchSizeNumberInput.value = String(ss);
-    stitchSizeVal.textContent = `${ss}px`;
   }
   {
-    const cc = clampInt(colorCountInput.value, 1, 16, 1);
+    const cc = clampInt(colorCountInput.value, 1, MAX_PALETTE_COLORS, 1);
     colorCountInput.value = String(cc);
     colorCountNumberInput.value = String(cc);
-    colorCountVal.textContent = String(cc);
   }
 
   updateUndoRedoButtons();
-  setCollageControlsState(false);
-  clearSelection();
+  setPaletteToolbarState();
   setupInteractiveFeedback();
 })();
